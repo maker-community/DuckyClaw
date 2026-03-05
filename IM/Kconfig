@@ -1,0 +1,7 @@
+menu "IM Config"
+    config OUTBOUND_STACK_SIZE
+        int "IM outbound thread stack size (bytes)"
+        default 12288
+        help
+            Stack size in bytes for the IM outbound thread (default 12*1024).
+endmenu
