@@ -3,6 +3,7 @@ dist
 .build
 .cache
 compile_commands.json
+tuya_app_config_secrets.h
 
 # Prerequisites
 *.d
