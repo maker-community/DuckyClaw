@@ -360,7 +360,7 @@ OPERATE_RET cron_service_start(void)
     }
 
     THREAD_CFG_T cfg = {0};
-    cfg.stackDepth   = 2560;
+    cfg.stackDepth   = CRON_THREAD_STACK;
     cfg.priority     = THREAD_PRIO_1;
     cfg.thrdname     = "claw_cron";
 
