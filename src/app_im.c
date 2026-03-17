@@ -82,9 +82,7 @@ static OPERATE_RET start_outbound_dispatcher(void)
 #if defined(ENABLE_EXT_RAM) && (ENABLE_EXT_RAM == 1)
     cfg.psram_mode = 1;
 #endif
-    PR_INFO("Device Free heap before outbound_loop %d", tal_system_get_free_heap_size());
     OPERATE_RET rt = tal_thread_create_and_start(&s_outbound_thd, NULL, NULL, outbound_dispatch_task, NULL, &cfg);
-    PR_INFO("Device Free heap after outbound_loop %d", tal_system_get_free_heap_size());
     return rt;
 }
 

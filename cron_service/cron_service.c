@@ -32,12 +32,6 @@
 #define CRON_THREAD_STACK (6 * 1024)
 #endif
 
-/* Minimum free internal heap required to safely create the cron thread.
- * Thread creation needs stack + TCB overhead; bail out if heap is too low. */
-#ifndef CRON_MIN_HEAP_TO_START
-#define CRON_MIN_HEAP_TO_START (CRON_THREAD_STACK + 4096)
-#endif
-
 /***********************************************************
 ***********************variable define**********************
 ***********************************************************/
@@ -363,14 +357,6 @@ OPERATE_RET cron_service_start(void)
                 job->next_run = job->at_epoch;
             }
         }
-    }
-
-    uint32_t free_heap = tal_system_get_free_heap_size();
-    PR_INFO("Device Free heap before cron start %u", (unsigned)free_heap);
-    if (free_heap < CRON_MIN_HEAP_TO_START) {
-        PR_ERR("Insufficient heap to start cron thread: %u < %u",
-               (unsigned)free_heap, (unsigned)CRON_MIN_HEAP_TO_START);
-        return OPRT_MALLOC_FAILED;
     }
 
     THREAD_CFG_T cfg = {0};

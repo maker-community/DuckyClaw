@@ -2177,11 +2177,6 @@ static void handle_event_payload(const uint8_t *payload, size_t payload_len)
 
     uint32_t free_heap = tal_system_get_free_heap_size();
     PR_INFO("Device Free heap %d", free_heap);
-    // if (free_heap < IM_LOW_HEAP_THRESHOLD) {
-    //     IM_LOGW(TAG, "[feishu] low heap %u, drop event payload len=%u",
-    //             (unsigned)free_heap, (unsigned)payload_len);
-    //     return;
-    // }
 
     cJSON *root = cJSON_ParseWithLength((const char *)payload, payload_len);
     if (!root) {
