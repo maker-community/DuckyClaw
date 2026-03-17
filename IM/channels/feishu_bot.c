@@ -31,7 +31,7 @@ static THREAD_HANDLE s_ws_thread         = NULL;
 #define FS_HTTP_TIMEOUT_MS         10000
 #define FS_HTTP_RESP_BUF_SIZE      (16 * 1024)
 #define FS_TOKEN_SAFETY_MARGIN_S   60
-#define FS_WS_RX_BUF_SIZE          (8 * 1024)
+#define FS_WS_RX_BUF_SIZE          (64 * 1024)
 #define FS_WS_DEFAULT_RECONNECT_MS 5000
 #define FS_WS_DEFAULT_PING_MS      (120 * 1000)
 /* Poll wait (ms) for receiving frames; smaller = lower latency, too small = more CPU spin */
