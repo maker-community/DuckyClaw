@@ -82,7 +82,8 @@ static OPERATE_RET start_outbound_dispatcher(void)
 #if defined(ENABLE_EXT_RAM) && (ENABLE_EXT_RAM == 1)
     cfg.psram_mode = 1;
 #endif
-    return tal_thread_create_and_start(&s_outbound_thd, NULL, NULL, outbound_dispatch_task, NULL, &cfg);
+    OPERATE_RET rt = tal_thread_create_and_start(&s_outbound_thd, NULL, NULL, outbound_dispatch_task, NULL, &cfg);
+    return rt;
 }
 
 static OPERATE_RET app_im_init_evt_cb(void *data)

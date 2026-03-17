@@ -371,6 +371,7 @@ OPERATE_RET cron_service_start(void)
         s_cron_thread = NULL;
         return rt;
     }
+    PR_INFO("Device Free heap after cron start %u", (unsigned)tal_system_get_free_heap_size());
 
     PR_INFO("Cron started (%d jobs, check every %u sec)", s_job_count,
             (unsigned)(CLAW_CRON_CHECK_INTERVAL_MS / 1000));
