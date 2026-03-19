@@ -10,6 +10,7 @@
 
 #include "ai_chat_main.h"
 #include "ducky_claw_chat.h"
+#include "ducky_custom_ui.h"
 #include "agent_loop.h"
 
 #include "app_im.h"
@@ -229,6 +230,12 @@ static void __ai_chat_handle_event(AI_NOTIFY_EVENT_T *event)
 OPERATE_RET ducky_claw_chat_init(void)
 {
     OPERATE_RET rt = OPRT_OK;
+
+#if defined(ENABLE_COMP_AI_DISPLAY) && (ENABLE_COMP_AI_DISPLAY == 1)
+#if defined(ENABLE_AI_CHAT_CUSTOM_UI) && (ENABLE_AI_CHAT_CUSTOM_UI == 1)
+    TUYA_CALL_ERR_RETURN(ducky_custom_ui_register());
+#endif
+#endif
 
     AI_CHAT_MODE_CFG_T ai_chat_cfg = {
         .default_mode = AI_CHAT_MODE_WAKEUP,
