@@ -509,6 +509,7 @@ static OPERATE_RET __tool_find_path(const MCP_PROPERTY_LIST_T *properties,
  * @param default_content Default content to write
  * @return OPERATE_RET OPRT_OK on success
  */
+#if (CLAW_USE_SDCARD == 1)
 static OPERATE_RET __create_default_file(const char *path, const char *default_content)
 {
     /* Check if file already exists by trying to open for read */
@@ -534,6 +535,7 @@ static OPERATE_RET __create_default_file(const char *path, const char *default_c
     PR_DEBUG("Created default file: %s", path);
     return OPRT_OK;
 }
+#endif /* CLAW_USE_SDCARD */
 
 /**
  * @brief Initialize filesystem
@@ -545,9 +547,8 @@ static OPERATE_RET __create_default_file(const char *path, const char *default_c
  */
 OPERATE_RET tool_files_fs_init(void)
 {
-    OPERATE_RET rt = OPRT_OK;
-
 #if (CLAW_USE_SDCARD == 1)
+    OPERATE_RET rt = OPRT_OK;
     /* Mount SD card filesystem */
     rt = claw_fs_mount(CLAW_FS_MOUNT_PATH, DEV_SDCARD);
     if (rt != OPRT_OK) {

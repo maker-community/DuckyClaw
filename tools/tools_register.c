@@ -11,6 +11,7 @@
 #include "tools_register.h"
 #include "tool_files.h"
 #include "tool_cron.h"
+#include "tool_wallpaper.h"
 #include "cron_service.h"
 #include "heartbeat.h"
 #include "memory_manager.h"
@@ -61,6 +62,12 @@ static OPERATE_RET __ai_mcp_init(void *data)
 
     /* Register cron tools */
     TUYA_CALL_ERR_RETURN(tool_cron_register());
+
+    /* Register wallpaper tool */
+    TUYA_CALL_ERR_RETURN(tool_wallpaper_register());
+
+    /* Restore wallpaper from KV URL (no-SD-card path, needs WiFi) */
+    TUYA_CALL_ERR_LOG(tool_wallpaper_restore());
 
     /* Register exec/system tools */
     #if defined(PLATFORM_LINUX) && (PLATFORM_LINUX == 1)

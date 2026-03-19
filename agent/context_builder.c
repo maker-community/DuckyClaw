@@ -130,7 +130,10 @@ size_t context_build_system_prompt(char *buf, size_t size)
                     "Device computes epoch internally — do NOT compute epoch yourself.\n"
                     "- cron_list: List all scheduled cron jobs. "
                     "MUST call this tool when the user asks about tasks/reminders.\n"
-                    "- cron_remove: Remove a scheduled cron job by ID.\n\n");
+                    "- cron_remove: Remove a scheduled cron job by ID.\n"
+                    "- set_wallpaper: Download an image from a URL and set it as the device screen background. "
+                    "Use when the user sends an image URL and asks to set it as wallpaper/background. "
+                    "Supports HTTP/HTTPS JPEG URLs up to 256 KB. Download is async.\n\n");
 
     off += snprintf(buf + off, size - off,
                     "## When to Use Tools (mandatory)\n"
@@ -138,9 +141,10 @@ size_t context_build_system_prompt(char *buf, size_t size)
                     "- Listing/removing reminders -> cron_list / cron_remove\n"
                     "- Reading/writing/finding files -> read_file / write_file / find_path / list_dir\n"
                     "- Asking current time or date -> get_current_time\n"
-                    "- Searching the web -> web_search\n\n"
+                    "- Searching the web -> web_search\n"
+                    "- Setting screen wallpaper/background from image URL -> set_wallpaper\n\n"
                     "## What You CANNOT Do (no tool exists)\n"
-                    "- Control hardware (camera, volume, lights, motors). "
+                    "- Control hardware beyond wallpaper (camera, volume, lights, motors). "
                     "If asked, reply: \"I don't have a tool to control that hardware.\"\n"
                     "- Send messages to other platforms. "
                     "- Access the internet beyond web_search.\n\n");

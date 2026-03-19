@@ -22,8 +22,22 @@
 #include "ai_ui_manage.h"
 #include "ai_ui_icon_font.h"
 #include "font_awesome_symbols.h"
+#include "cron_service.h"
 
 #include "ducky_custom_ui.h"
+
+#if defined(ENABLE_COMP_AI_PICTURE) && (ENABLE_COMP_AI_PICTURE == 1)
+#include "tkl_jpeg_codec.h"
+#include "tool_files.h"
+
+/* SD card: save/restore JPEG file directly.
+ * SPIFFS: URL is persisted to KV by tool_wallpaper.c;
+ *         restore is triggered after MQTT connects (tool_wallpaper_restore). */
+#if defined(CLAW_USE_SDCARD) && (CLAW_USE_SDCARD == 1)
+#define WALLPAPER_FILE             CLAW_FS_ROOT_PATH "/config/wallpaper.jpg"
+#define WALLPAPER_MAX_RESTORE_SIZE (256 * 1024)
+#endif
+#endif
 
 /* ── Dimensions ── */
 #define DUCKY_TOP_BAR_H   24
@@ -49,6 +63,7 @@ typedef enum {
     DUCKY_UI_DISP_WEATHER,
     DUCKY_UI_DISP_HOROSCOPE,
     DUCKY_UI_DISP_ALMANAC,
+    DUCKY_UI_DISP_SYS_STATUS,
 } DUCKY_UI_DISP_TYPE_E;
 
 /* ── Widget tree ── */
@@ -73,6 +88,7 @@ typedef struct {
     lv_obj_t *horoscope_body;
     lv_obj_t *almanac_body;
     lv_obj_t *weather_body;
+    lv_obj_t *sys_body;
 
     /* AI panel */
     lv_obj_t *ai_panel;
@@ -83,6 +99,62 @@ static DUCKY_CUSTOM_UI_T sg_ui;
 static bool              sg_is_streaming    = false;
 static lv_timer_t       *sg_notification_tm = NULL;
 static lv_timer_t       *sg_clock_tm        = NULL;
+static lv_timer_t       *sg_sys_poll_tm     = NULL;
+
+/* ── Wallpaper state ── */
+#if defined(ENABLE_COMP_AI_PICTURE) && (ENABLE_COMP_AI_PICTURE == 1)
+static lv_obj_t      *sg_wallpaper_img     = NULL;
+static uint8_t       *sg_wallpaper_pixels  = NULL;
+static lv_image_dsc_t sg_wallpaper_dsc;
+
+/* Load persisted wallpaper from filesystem and apply to screen.
+ * Only active on SD card builds — SPIFFS restore is handled by
+ * tool_wallpaper_restore() after MQTT connects. */
+static void __wallpaper_restore(void)
+{
+#if defined(CLAW_USE_SDCARD) && (CLAW_USE_SDCARD == 1)
+    PR_NOTICE("wallpaper: restore check %s", WALLPAPER_FILE);
+
+    TUYA_FILE f = claw_fopen(WALLPAPER_FILE, "r");
+    if (!f) {
+        PR_NOTICE("wallpaper: no saved wallpaper file, skip restore");
+        return;
+    }
+
+    int fsize = claw_fgetsize(WALLPAPER_FILE);
+    if (fsize <= 0 || fsize > WALLPAPER_MAX_RESTORE_SIZE) {
+        claw_fclose(f);
+        PR_WARN("wallpaper: restore skipped, fsize=%d", fsize);
+        return;
+    }
+
+    uint8_t *buf = (uint8_t *)tal_malloc((uint32_t)fsize);
+    if (!buf) {
+        claw_fclose(f);
+        PR_ERR("wallpaper: restore malloc failed for %d bytes", fsize);
+        return;
+    }
+
+    int rd = claw_fread(buf, fsize, f);
+    claw_fclose(f);
+
+    if (rd != fsize) {
+        PR_ERR("wallpaper: restore read %d/%d bytes", rd, fsize);
+        tal_free(buf);
+        return;
+    }
+
+    PR_NOTICE("wallpaper: restoring %d bytes from SD card", fsize);
+    OPERATE_RET rt = ducky_custom_ui_set_wallpaper(buf, (uint32_t)fsize);
+    if (rt != OPRT_OK) {
+        PR_ERR("wallpaper: restore apply failed, rt=%d", rt);
+    }
+    tal_free(buf);
+#else
+    PR_NOTICE("wallpaper: SPIFFS build, wallpaper restore via KV after WiFi connects");
+#endif
+}
+#endif
 
 /* ── Helpers ── */
 
@@ -95,6 +167,21 @@ static void __notification_timeout_cb(lv_timer_t *timer)
     }
     lv_obj_add_flag(sg_ui.notification_label, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(sg_ui.status_label, LV_OBJ_FLAG_HIDDEN);
+}
+
+/* Poll cron job count and heartbeat status every 15 s */
+static void __sys_poll_cb(lv_timer_t *timer)
+{
+    (void)timer;
+    if (!sg_ui.sys_body) return;
+    const cron_job_t *jobs = NULL;
+    int count = 0;
+    cron_list_jobs(&jobs, &count);
+    char buf[64];
+    snprintf(buf, sizeof(buf), "心跳:运行中  定时:%d个", count);
+    lv_vendor_disp_lock();
+    lv_label_set_text(sg_ui.sys_body, buf);
+    lv_vendor_disp_unlock();
 }
 
 static void __clock_update_cb(lv_timer_t *timer)
@@ -268,7 +355,7 @@ static OPERATE_RET __ui_init(void)
     lv_obj_clear_flag(sg_ui.info_panel, LV_OBJ_FLAG_SCROLLABLE);
 
     int card_w = LV_HOR_RES - 12;
-    int card_h = (DUCKY_INFO_H - 6 - 12) / 3;
+    int card_h = (DUCKY_INFO_H - 6 - 18) / 4;
 
     __make_card(sg_ui.info_panel, card_w, card_h, &sg_ui.horoscope_body,
                 FONT_AWESOME_EMOJI_HAPPY, "星座运势", "今日运势加载中…");
@@ -278,6 +365,9 @@ static OPERATE_RET __ui_init(void)
 
     __make_card(sg_ui.info_panel, card_w, card_h, &sg_ui.weather_body,
                 FONT_AWESOME_GLOBE, "天气", "天气信息加载中…");
+
+    __make_card(sg_ui.info_panel, card_w, card_h, &sg_ui.sys_body,
+                FONT_AWESOME_GEAR, "系统状态", "初始化中…");
 
     /* ── AI MESSAGE PANEL ── */
     sg_ui.ai_panel = lv_obj_create(sg_ui.screen);
@@ -310,6 +400,15 @@ static OPERATE_RET __ui_init(void)
     /* Clock timer: fires every 30s, immediately on first run */
     sg_clock_tm = lv_timer_create(__clock_update_cb, 30000, NULL);
     lv_timer_ready(sg_clock_tm);
+
+    /* Sys status poll timer: fires every 15s, immediately on first run */
+    sg_sys_poll_tm = lv_timer_create(__sys_poll_cb, 15000, NULL);
+    lv_timer_ready(sg_sys_poll_tm);
+
+#if defined(ENABLE_COMP_AI_PICTURE) && (ENABLE_COMP_AI_PICTURE == 1)
+    /* Restore wallpaper saved from previous session */
+    __wallpaper_restore();
+#endif
 
     return rt;
 }
@@ -409,6 +508,10 @@ static void __ui_disp_other_msg(uint32_t type, uint8_t *data, int len)
             lv_label_set_text(sg_ui.lunar_label, hint);
         }
         break;
+    case DUCKY_UI_DISP_SYS_STATUS:
+        if (sg_ui.sys_body)
+            lv_label_set_text(sg_ui.sys_body, tmp);
+        break;
     default:
         break;
     }
@@ -495,6 +598,103 @@ OPERATE_RET ducky_custom_ui_set_almanac(const char *text)
                           (uint8_t *)text, strlen(text));
 }
 
+OPERATE_RET ducky_custom_ui_set_sys_status(const char *text)
+{
+    if (!text) return OPRT_INVALID_PARM;
+    return ai_ui_disp_msg((AI_UI_DISP_TYPE_E)DUCKY_UI_DISP_SYS_STATUS,
+                          (uint8_t *)text, strlen(text));
+}
+
+OPERATE_RET ducky_custom_ui_set_wallpaper(const uint8_t *data, uint32_t size)
+{
+    if (!data || size == 0) return OPRT_INVALID_PARM;
+
+#if defined(ENABLE_COMP_AI_PICTURE) && (ENABLE_COMP_AI_PICTURE == 1)
+    /* ── Decode JPEG → RGB565 using T5AI hardware JPEG decoder ── */
+    TKL_JPEG_CODEC_INFO_T info;
+    memset(&info, 0, sizeof(info));
+
+    OPERATE_RET rt = tkl_jpeg_codec_img_info_get((uint8_t *)data, size, &info);
+    if (rt != OPRT_OK) {
+        PR_ERR("wallpaper: tkl_jpeg_codec_img_info_get failed: %d", rt);
+        return rt;
+    }
+
+    if (info.out_width == 0 || info.out_height == 0) {
+        PR_ERR("wallpaper: invalid image dimensions %ux%u", info.out_width, info.out_height);
+        return OPRT_INVALID_PARM;
+    }
+
+    uint32_t pixels_size = (uint32_t)info.out_width * (uint32_t)info.out_height * 2u; /* RGB565 */
+    uint8_t *new_pixels = (uint8_t *)tal_malloc(pixels_size);
+    if (!new_pixels) {
+        PR_ERR("wallpaper: malloc failed for %u bytes", pixels_size);
+        return OPRT_MALLOC_FAILED;
+    }
+
+    info.in_size = size;
+    rt = tkl_jpeg_codec_convert((uint8_t *)data, new_pixels, &info, JPEG_DEC_OUT_RGB565);
+    if (rt != OPRT_OK) {
+        PR_ERR("wallpaper: tkl_jpeg_codec_convert failed: %d", rt);
+        tal_free(new_pixels);
+        return rt;
+    }
+
+    /* ── Apply decoded image inside LVGL lock ── */
+    lv_vendor_disp_lock();
+
+    /* Hide old widget so LVGL stops referencing old pixel data */
+    if (sg_wallpaper_img) {
+        lv_obj_add_flag(sg_wallpaper_img, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    /* Swap buffers and update descriptor */
+    uint8_t *old_pixels   = sg_wallpaper_pixels;
+    sg_wallpaper_pixels   = new_pixels;
+
+    memset(&sg_wallpaper_dsc, 0, sizeof(sg_wallpaper_dsc));
+    sg_wallpaper_dsc.header.magic  = LV_IMAGE_HEADER_MAGIC;
+    sg_wallpaper_dsc.header.cf     = LV_COLOR_FORMAT_RGB565;
+    sg_wallpaper_dsc.header.w      = info.out_width;
+    sg_wallpaper_dsc.header.h      = info.out_height;
+    sg_wallpaper_dsc.header.stride = (uint32_t)info.out_width * 2u;
+    sg_wallpaper_dsc.data_size     = pixels_size;
+    sg_wallpaper_dsc.data          = sg_wallpaper_pixels;
+
+    /* Create or update background image widget */
+    if (!sg_wallpaper_img) {
+        sg_wallpaper_img = lv_image_create(sg_ui.screen);
+        lv_obj_set_pos(sg_wallpaper_img, 0, 0);
+        lv_obj_set_size(sg_wallpaper_img, LV_HOR_RES, LV_VER_RES);
+    }
+    lv_image_set_src(sg_wallpaper_img, &sg_wallpaper_dsc);
+    lv_obj_clear_flag(sg_wallpaper_img, LV_OBJ_FLAG_HIDDEN);
+    /* Keep it at index 0 so it renders first (behind all panels) */
+    lv_obj_move_to_index(sg_wallpaper_img, 0);
+
+    /* Make screen bg transparent and panels semi-transparent so wallpaper shows through */
+    lv_obj_set_style_bg_opa(sg_ui.screen,      LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_opa(sg_ui.top_bar,     LV_OPA_80,     0);
+    lv_obj_set_style_bg_opa(sg_ui.time_panel,  LV_OPA_70,     0);
+    lv_obj_set_style_bg_opa(sg_ui.info_panel,  LV_OPA_70,     0);
+    lv_obj_set_style_bg_opa(sg_ui.ai_panel,    LV_OPA_80,     0);
+
+    /* Free the superseded buffer while still holding the lock */
+    if (old_pixels) {
+        tal_free(old_pixels);
+    }
+
+    lv_vendor_disp_unlock();
+
+    PR_NOTICE("wallpaper: applied %ux%u image to background", info.out_width, info.out_height);
+    return OPRT_OK;
+#else
+    /* No hardware JPEG decoder on this platform — image was saved to FS only */
+    PR_WARN("wallpaper: JPEG decode unavailable (ENABLE_COMP_AI_PICTURE not set)");
+    return OPRT_NOT_SUPPORTED;
+#endif
+}
+
 #else   /* ENABLE_AI_CHAT_CUSTOM_UI */
 
 OPERATE_RET ducky_custom_ui_register(void)                       { return OPRT_OK; }
@@ -503,6 +703,8 @@ OPERATE_RET ducky_custom_ui_set_image_desc(const char *d)        { (void)d; retu
 OPERATE_RET ducky_custom_ui_set_weather(const char *t)           { (void)t; return OPRT_NOT_SUPPORTED; }
 OPERATE_RET ducky_custom_ui_set_horoscope(const char *t)         { (void)t; return OPRT_NOT_SUPPORTED; }
 OPERATE_RET ducky_custom_ui_set_almanac(const char *t)           { (void)t; return OPRT_NOT_SUPPORTED; }
+OPERATE_RET ducky_custom_ui_set_sys_status(const char *t)        { (void)t; return OPRT_NOT_SUPPORTED; }
+OPERATE_RET ducky_custom_ui_set_wallpaper(const uint8_t *d, uint32_t s) { (void)d; (void)s; return OPRT_NOT_SUPPORTED; }
 
 #endif  /* ENABLE_AI_CHAT_CUSTOM_UI */
 #endif  /* ENABLE_COMP_AI_DISPLAY */
