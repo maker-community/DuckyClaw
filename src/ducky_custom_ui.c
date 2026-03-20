@@ -621,6 +621,18 @@ OPERATE_RET ducky_custom_ui_set_wallpaper(const uint8_t *data, uint32_t size)
     }
 
     uint32_t pixels_size = (uint32_t)info.out_width * (uint32_t)info.out_height * 2u; /* RGB565 */
+
+    /* ── Free old buffer first to reclaim memory before allocating new one ── */
+    lv_vendor_disp_lock();
+    if (sg_wallpaper_img) {
+        lv_obj_add_flag(sg_wallpaper_img, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (sg_wallpaper_pixels) {
+        tal_free(sg_wallpaper_pixels);
+        sg_wallpaper_pixels = NULL;
+    }
+    lv_vendor_disp_unlock();
+
     uint8_t *new_pixels = (uint8_t *)tal_malloc(pixels_size);
     if (!new_pixels) {
         PR_ERR("wallpaper: malloc failed for %u bytes", pixels_size);
@@ -638,14 +650,7 @@ OPERATE_RET ducky_custom_ui_set_wallpaper(const uint8_t *data, uint32_t size)
     /* ── Apply decoded image inside LVGL lock ── */
     lv_vendor_disp_lock();
 
-    /* Hide old widget so LVGL stops referencing old pixel data */
-    if (sg_wallpaper_img) {
-        lv_obj_add_flag(sg_wallpaper_img, LV_OBJ_FLAG_HIDDEN);
-    }
-
-    /* Swap buffers and update descriptor */
-    uint8_t *old_pixels   = sg_wallpaper_pixels;
-    sg_wallpaper_pixels   = new_pixels;
+    sg_wallpaper_pixels = new_pixels;
 
     memset(&sg_wallpaper_dsc, 0, sizeof(sg_wallpaper_dsc));
     sg_wallpaper_dsc.header.magic  = LV_IMAGE_HEADER_MAGIC;
@@ -669,11 +674,6 @@ OPERATE_RET ducky_custom_ui_set_wallpaper(const uint8_t *data, uint32_t size)
 
     /* Make screen bg transparent so wallpaper shows through the glass panels */
     lv_obj_set_style_bg_opa(sg_ui.screen, LV_OPA_TRANSP, 0);
-
-    /* Free the superseded buffer while still holding the lock */
-    if (old_pixels) {
-        tal_free(old_pixels);
-    }
 
     lv_vendor_disp_unlock();
 
