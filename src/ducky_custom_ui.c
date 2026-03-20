@@ -39,22 +39,14 @@
 #endif
 #endif
 
-/* ── Dimensions ── */
-#define DUCKY_TOP_BAR_H   24
+/* ── Dimensions for Glass Layout ── */
+#define DUCKY_MARGIN      12
+#define DUCKY_TOP_BAR_H   28
 #define DUCKY_TIME_H      80
-#define DUCKY_AI_H        120
-#define DUCKY_INFO_H      (LV_VER_RES - DUCKY_TOP_BAR_H - DUCKY_TIME_H - DUCKY_AI_H)
-
-/* ── Colours ── */
-#define COLOR_BG_TOP      0x060B14
-#define COLOR_BG_MID      0x0D1B33
-#define COLOR_BG_BOTTOM   0x070D1C
-#define COLOR_ACCENT      0x2979FF
-#define COLOR_ACCENT2     0x00E5FF
-#define COLOR_TEXT_DIM    0xB0C4DE
-#define COLOR_TEXT_CYAN   0x4FC3F7
-#define COLOR_TEXT_YELLOW 0xFFEB3B
-#define COLOR_CARD_BG     0x102040
+#define DUCKY_AI_H        140
+#define DUCKY_INFO_H      172 /* 2 rows of 80px cards + 12px gap */
+#define DUCKY_CARD_W      ((LV_HOR_RES - (DUCKY_MARGIN * 2) - 12) / 2)
+#define DUCKY_CARD_H      80
 
 /* ── Extended display type IDs ── */
 typedef enum {
@@ -203,41 +195,51 @@ static void __clock_update_cb(lv_timer_t *timer)
     lv_vendor_disp_unlock();
 }
 
+/* ── Glass Style Helper ── */
+static void __apply_glass_style(lv_obj_t *obj, lv_coord_t radius)
+{
+    lv_obj_set_style_radius(obj, radius, 0);
+    lv_obj_set_style_bg_color(obj, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(obj, LV_OPA_40, 0);
+    lv_obj_set_style_border_color(obj, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_border_width(obj, 1, 0);
+    lv_obj_set_style_border_opa(obj, LV_OPA_20, 0);
+}
+
 /* Create a rounded info card. Returns card; sets *out_body. */
 static lv_obj_t *__make_card(lv_obj_t *parent, int w, int h,
                               lv_obj_t **out_body,
                               const char *icon_sym,
+                              lv_color_t icon_color,
                               const char *title_text,
                               const char *body_text)
 {
     lv_obj_t *card = lv_obj_create(parent);
     lv_obj_set_size(card, w, h);
-    lv_obj_set_style_radius(card, 8, 0);
-    lv_obj_set_style_bg_color(card, lv_color_hex(COLOR_CARD_BG), 0);
-    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(card, lv_color_hex(COLOR_ACCENT), 0);
-    lv_obj_set_style_border_width(card, 1, 0);
-    lv_obj_set_style_pad_all(card, 6, 0);
+    __apply_glass_style(card, 16);
+    lv_obj_set_style_pad_all(card, 10, 0);
     lv_obj_set_scrollbar_mode(card, LV_SCROLLBAR_MODE_OFF);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *icon = lv_label_create(card);
     lv_obj_set_style_text_font(icon, ai_ui_get_icon_font(), 0);
-    lv_obj_set_style_text_color(icon, lv_color_hex(COLOR_ACCENT2), 0);
+    lv_obj_set_style_text_color(icon, icon_color, 0);
     lv_label_set_text(icon, icon_sym);
     lv_obj_align(icon, LV_ALIGN_TOP_LEFT, 0, 0);
 
     lv_obj_t *title = lv_label_create(card);
-    lv_obj_set_style_text_color(title, lv_color_hex(COLOR_TEXT_CYAN), 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_opa(title, LV_OPA_80, 0);
     lv_label_set_text(title, title_text);
-    lv_obj_align_to(title, icon, LV_ALIGN_OUT_RIGHT_MID, 4, 0);
+    lv_obj_align_to(title, icon, LV_ALIGN_OUT_RIGHT_MID, 6, 0);
 
     lv_obj_t *body = lv_label_create(card);
-    lv_obj_set_width(body, w - 12);
-    lv_obj_set_style_text_color(body, lv_color_hex(COLOR_TEXT_DIM), 0);
+    lv_obj_set_width(body, w - 20);
+    lv_obj_set_style_text_color(body, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_opa(body, LV_OPA_COVER, 0);
     lv_label_set_long_mode(body, LV_LABEL_LONG_WRAP);
     lv_label_set_text(body, body_text);
-    lv_obj_align(body, LV_ALIGN_TOP_LEFT, 0, 20);
+    lv_obj_align(body, LV_ALIGN_TOP_LEFT, 0, 24);
 
     if (out_body) *out_body = body;
     return card;
@@ -267,133 +269,126 @@ static OPERATE_RET __ui_init(void)
         lv_obj_set_style_text_font(sg_ui.screen, text_font, 0);
     }
 
-    lv_obj_set_style_bg_color(sg_ui.screen, lv_color_hex(COLOR_BG_BOTTOM), 0);
+    lv_obj_set_style_bg_color(sg_ui.screen, lv_color_hex(0x111111), 0);
     lv_obj_set_style_bg_opa(sg_ui.screen, LV_OPA_COVER, 0);
     lv_obj_set_style_text_color(sg_ui.screen, lv_color_white(), 0);
     lv_obj_set_style_pad_all(sg_ui.screen, 0, 0);
 
     /* ── TOP STATUS BAR ── */
     sg_ui.top_bar = lv_obj_create(sg_ui.screen);
-    lv_obj_set_size(sg_ui.top_bar, LV_HOR_RES, DUCKY_TOP_BAR_H);
-    lv_obj_align(sg_ui.top_bar, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_set_style_radius(sg_ui.top_bar, 0, 0);
-    lv_obj_set_style_bg_color(sg_ui.top_bar, lv_color_hex(COLOR_BG_TOP), 0);
-    lv_obj_set_style_bg_opa(sg_ui.top_bar, LV_OPA_COVER, 0);
+    lv_obj_set_size(sg_ui.top_bar, LV_HOR_RES - DUCKY_MARGIN * 2, DUCKY_TOP_BAR_H);
+    lv_obj_align(sg_ui.top_bar, LV_ALIGN_TOP_MID, 0, DUCKY_MARGIN);
+    __apply_glass_style(sg_ui.top_bar, DUCKY_TOP_BAR_H / 2);
     lv_obj_set_style_pad_all(sg_ui.top_bar, 0, 0);
-    lv_obj_set_style_border_color(sg_ui.top_bar, lv_color_hex(COLOR_ACCENT), 0);
-    lv_obj_set_style_border_width(sg_ui.top_bar, 1, 0);
-    lv_obj_set_style_border_side(sg_ui.top_bar, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_clear_flag(sg_ui.top_bar, LV_OBJ_FLAG_SCROLLABLE);
 
     sg_ui.chat_mode_label = lv_label_create(sg_ui.top_bar);
     lv_label_set_text(sg_ui.chat_mode_label, "Chat");
     lv_obj_set_style_text_color(sg_ui.chat_mode_label, lv_color_white(), 0);
-    lv_obj_align(sg_ui.chat_mode_label, LV_ALIGN_LEFT_MID, 6, 0);
+    lv_obj_align(sg_ui.chat_mode_label, LV_ALIGN_LEFT_MID, 12, 0);
 
     sg_ui.notification_label = lv_label_create(sg_ui.top_bar);
     lv_label_set_text(sg_ui.notification_label, "");
-    lv_obj_set_width(sg_ui.notification_label, LV_HOR_RES - 100);
+    lv_obj_set_width(sg_ui.notification_label, LV_HOR_RES - 120);
     lv_obj_set_style_text_align(sg_ui.notification_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(sg_ui.notification_label, lv_color_hex(COLOR_TEXT_YELLOW), 0);
+    lv_obj_set_style_text_color(sg_ui.notification_label, lv_color_hex(0xFFD60A), 0);
     lv_obj_align(sg_ui.notification_label, LV_ALIGN_CENTER, 0, 0);
     lv_obj_add_flag(sg_ui.notification_label, LV_OBJ_FLAG_HIDDEN);
 
     sg_ui.status_label = lv_label_create(sg_ui.top_bar);
-    lv_obj_set_width(sg_ui.status_label, LV_HOR_RES - 100);
+    lv_obj_set_width(sg_ui.status_label, LV_HOR_RES - 120);
     lv_label_set_long_mode(sg_ui.status_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_label_set_text(sg_ui.status_label, "Initializing");
     lv_obj_set_style_text_align(sg_ui.status_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(sg_ui.status_label, lv_color_hex(COLOR_TEXT_CYAN), 0);
+    lv_obj_set_style_text_color(sg_ui.status_label, lv_color_white(), 0);
+    lv_obj_set_style_text_opa(sg_ui.status_label, LV_OPA_80, 0);
     lv_obj_align(sg_ui.status_label, LV_ALIGN_CENTER, 0, 0);
 
-    /* WiFi icon: explicitly white so it shows on the dark bar */
+    /* WiFi icon */
     sg_ui.network_label = lv_label_create(sg_ui.top_bar);
     lv_obj_set_style_text_font(sg_ui.network_label, ai_ui_get_icon_font(), 0);
     lv_obj_set_style_text_color(sg_ui.network_label, lv_color_white(), 0);
     lv_label_set_text(sg_ui.network_label, ai_ui_get_wifi_icon(AI_UI_WIFI_STATUS_DISCONNECTED));
-    lv_obj_align(sg_ui.network_label, LV_ALIGN_RIGHT_MID, -6, 0);
+    lv_obj_align(sg_ui.network_label, LV_ALIGN_RIGHT_MID, -12, 0);
 
     /* ── TIME PANEL ── */
     sg_ui.time_panel = lv_obj_create(sg_ui.screen);
-    lv_obj_set_size(sg_ui.time_panel, LV_HOR_RES, DUCKY_TIME_H);
-    lv_obj_align(sg_ui.time_panel, LV_ALIGN_TOP_MID, 0, DUCKY_TOP_BAR_H);
-    lv_obj_set_style_radius(sg_ui.time_panel, 0, 0);
-    lv_obj_set_style_border_width(sg_ui.time_panel, 0, 0);
-    lv_obj_set_style_bg_color(sg_ui.time_panel, lv_color_hex(COLOR_BG_MID), 0);
-    lv_obj_set_style_bg_opa(sg_ui.time_panel, LV_OPA_COVER, 0);
-    lv_obj_set_style_pad_all(sg_ui.time_panel, 4, 0);
+    lv_obj_set_size(sg_ui.time_panel, LV_HOR_RES - DUCKY_MARGIN * 2, DUCKY_TIME_H);
+    lv_obj_align(sg_ui.time_panel, LV_ALIGN_TOP_MID, 0, DUCKY_MARGIN + DUCKY_TOP_BAR_H + DUCKY_MARGIN);
+    __apply_glass_style(sg_ui.time_panel, 16);
+    lv_obj_set_style_pad_all(sg_ui.time_panel, 12, 0);
     lv_obj_clear_flag(sg_ui.time_panel, LV_OBJ_FLAG_SCROLLABLE);
 
     sg_ui.time_label = lv_label_create(sg_ui.time_panel);
     lv_obj_set_style_text_color(sg_ui.time_label, lv_color_white(), 0);
     lv_label_set_text(sg_ui.time_label, "--:--");
-    lv_obj_align(sg_ui.time_label, LV_ALIGN_LEFT_MID, 8, -6);
+    lv_obj_align(sg_ui.time_label, LV_ALIGN_LEFT_MID, 8, 0);
 
     sg_ui.date_label = lv_label_create(sg_ui.time_panel);
-    lv_obj_set_style_text_color(sg_ui.date_label, lv_color_hex(COLOR_TEXT_DIM), 0);
+    lv_obj_set_style_text_color(sg_ui.date_label, lv_color_white(), 0);
+    lv_obj_set_style_text_opa(sg_ui.date_label, LV_OPA_80, 0);
     lv_label_set_text(sg_ui.date_label, "----年--月--日");
-    lv_obj_align(sg_ui.date_label, LV_ALIGN_LEFT_MID, 8, 14);
+    lv_obj_align(sg_ui.date_label, LV_ALIGN_TOP_RIGHT, -4, 4);
 
     sg_ui.lunar_label = lv_label_create(sg_ui.time_panel);
-    lv_obj_set_width(sg_ui.lunar_label, 130);
+    lv_obj_set_width(sg_ui.lunar_label, 150);
+    lv_obj_set_style_text_align(sg_ui.lunar_label, LV_TEXT_ALIGN_RIGHT, 0);
     lv_label_set_long_mode(sg_ui.lunar_label, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_color(sg_ui.lunar_label, lv_color_hex(COLOR_TEXT_CYAN), 0);
+    lv_obj_set_style_text_color(sg_ui.lunar_label, lv_color_white(), 0);
+    lv_obj_set_style_text_opa(sg_ui.lunar_label, LV_OPA_60, 0);
     lv_label_set_text(sg_ui.lunar_label, "农历加载中…");
-    lv_obj_align(sg_ui.lunar_label, LV_ALIGN_RIGHT_MID, -8, 0);
+    lv_obj_align(sg_ui.lunar_label, LV_ALIGN_BOTTOM_RIGHT, -4, -4);
 
     /* ── INFO CARDS PANEL ── */
     sg_ui.info_panel = lv_obj_create(sg_ui.screen);
-    lv_obj_set_size(sg_ui.info_panel, LV_HOR_RES, DUCKY_INFO_H);
-    lv_obj_align(sg_ui.info_panel, LV_ALIGN_TOP_MID, 0, DUCKY_TOP_BAR_H + DUCKY_TIME_H);
-    lv_obj_set_style_radius(sg_ui.info_panel, 0, 0);
+    lv_obj_set_size(sg_ui.info_panel, LV_HOR_RES - DUCKY_MARGIN * 2, DUCKY_INFO_H);
+    lv_obj_align(sg_ui.info_panel, LV_ALIGN_TOP_MID, 0, DUCKY_MARGIN + DUCKY_TOP_BAR_H + DUCKY_MARGIN + DUCKY_TIME_H + DUCKY_MARGIN);
+    lv_obj_set_style_bg_opa(sg_ui.info_panel, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(sg_ui.info_panel, 0, 0);
-    lv_obj_set_style_bg_color(sg_ui.info_panel, lv_color_hex(COLOR_BG_BOTTOM), 0);
-    lv_obj_set_style_bg_opa(sg_ui.info_panel, LV_OPA_COVER, 0);
-    lv_obj_set_style_pad_all(sg_ui.info_panel, 6, 0);
-    lv_obj_set_style_pad_row(sg_ui.info_panel, 6, 0);
-    lv_obj_set_flex_flow(sg_ui.info_panel, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_scrollbar_mode(sg_ui.info_panel, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_style_pad_all(sg_ui.info_panel, 0, 0);
+    lv_obj_set_style_pad_row(sg_ui.info_panel, 12, 0);
+    lv_obj_set_style_pad_column(sg_ui.info_panel, 12, 0);
+    lv_obj_set_flex_flow(sg_ui.info_panel, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_clear_flag(sg_ui.info_panel, LV_OBJ_FLAG_SCROLLABLE);
 
-    int card_w = LV_HOR_RES - 12;
-    int card_h = (DUCKY_INFO_H - 6 - 18) / 4;
+    __make_card(sg_ui.info_panel, DUCKY_CARD_W, DUCKY_CARD_H, &sg_ui.horoscope_body,
+                FONT_AWESOME_EMOJI_HAPPY, lv_color_hex(0xFF9F0A), "星座", "运势加载中…");
 
-    __make_card(sg_ui.info_panel, card_w, card_h, &sg_ui.horoscope_body,
-                FONT_AWESOME_EMOJI_HAPPY, "星座运势", "今日运势加载中…");
+    __make_card(sg_ui.info_panel, DUCKY_CARD_W, DUCKY_CARD_H, &sg_ui.almanac_body,
+                FONT_AWESOME_CHECK, lv_color_hex(0x32D74B), "黄历", "宜忌加载中…");
 
-    __make_card(sg_ui.info_panel, card_w, card_h, &sg_ui.almanac_body,
-                FONT_AWESOME_CHECK, "黄历宜忌", "宜: 加载中…  忌: 加载中…");
+    __make_card(sg_ui.info_panel, DUCKY_CARD_W, DUCKY_CARD_H, &sg_ui.weather_body,
+                FONT_AWESOME_GLOBE, lv_color_hex(0x0A84FF), "天气", "信息加载中…");
 
-    __make_card(sg_ui.info_panel, card_w, card_h, &sg_ui.weather_body,
-                FONT_AWESOME_GLOBE, "天气", "天气信息加载中…");
-
-    __make_card(sg_ui.info_panel, card_w, card_h, &sg_ui.sys_body,
-                FONT_AWESOME_GEAR, "系统状态", "初始化中…");
+    __make_card(sg_ui.info_panel, DUCKY_CARD_W, DUCKY_CARD_H, &sg_ui.sys_body,
+                FONT_AWESOME_GEAR, lv_color_hex(0xFF453A), "系统", "状态加载中…");
 
     /* ── AI MESSAGE PANEL ── */
     sg_ui.ai_panel = lv_obj_create(sg_ui.screen);
-    lv_obj_set_size(sg_ui.ai_panel, LV_HOR_RES, DUCKY_AI_H);
-    lv_obj_align(sg_ui.ai_panel, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_style_radius(sg_ui.ai_panel, 0, 0);
-    lv_obj_set_style_bg_color(sg_ui.ai_panel, lv_color_hex(COLOR_BG_MID), 0);
-    lv_obj_set_style_bg_opa(sg_ui.ai_panel, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(sg_ui.ai_panel, lv_color_hex(COLOR_ACCENT), 0);
-    lv_obj_set_style_border_width(sg_ui.ai_panel, 2, 0);
-    lv_obj_set_style_border_side(sg_ui.ai_panel, LV_BORDER_SIDE_TOP, 0);
-    lv_obj_set_style_pad_all(sg_ui.ai_panel, 6, 0);
+    lv_obj_set_size(sg_ui.ai_panel, LV_HOR_RES - DUCKY_MARGIN * 2, DUCKY_AI_H);
+    lv_obj_align(sg_ui.ai_panel, LV_ALIGN_BOTTOM_MID, 0, -DUCKY_MARGIN);
+    __apply_glass_style(sg_ui.ai_panel, 16);
+    lv_obj_set_style_pad_all(sg_ui.ai_panel, 12, 0);
     lv_obj_clear_flag(sg_ui.ai_panel, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *ai_icon = lv_label_create(sg_ui.ai_panel);
     lv_obj_set_style_text_font(ai_icon, ai_ui_get_icon_font(), 0);
-    lv_obj_set_style_text_color(ai_icon, lv_color_hex(COLOR_ACCENT2), 0);
+    lv_obj_set_style_text_color(ai_icon, lv_color_hex(0xAF52DE), 0);
     lv_label_set_text(ai_icon, FONT_AWESOME_AI_CHIP);
     lv_obj_align(ai_icon, LV_ALIGN_TOP_LEFT, 0, 0);
 
+    lv_obj_t *ai_title = lv_label_create(sg_ui.ai_panel);
+    lv_label_set_text(ai_title, "AI Assistant");
+    lv_obj_set_style_text_color(ai_title, lv_color_white(), 0);
+    lv_obj_set_style_text_opa(ai_title, LV_OPA_80, 0);
+    lv_obj_align_to(ai_title, ai_icon, LV_ALIGN_OUT_RIGHT_MID, 6, 0);
+
     sg_ui.ai_msg_label = lv_label_create(sg_ui.ai_panel);
-    lv_obj_set_size(sg_ui.ai_msg_label, LV_HOR_RES - 30, DUCKY_AI_H - 12);
+    lv_obj_set_size(sg_ui.ai_msg_label, LV_HOR_RES - DUCKY_MARGIN * 2 - 24, DUCKY_AI_H - 36);
     lv_label_set_long_mode(sg_ui.ai_msg_label, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_color(sg_ui.ai_msg_label, lv_color_white(), 0);
-    lv_label_set_text(sg_ui.ai_msg_label, "DuckyClaw 已就绪，有什么可以帮你？");
-    lv_obj_align(sg_ui.ai_msg_label, LV_ALIGN_TOP_LEFT, 22, 0);
+    lv_label_set_text(sg_ui.ai_msg_label, "DuckyClaw 已就绪\n有什么可以帮你？");
+    lv_obj_align(sg_ui.ai_msg_label, LV_ALIGN_TOP_LEFT, 0, 24);
 
     lv_vendor_disp_unlock();
 
@@ -672,12 +667,8 @@ OPERATE_RET ducky_custom_ui_set_wallpaper(const uint8_t *data, uint32_t size)
     /* Keep it at index 0 so it renders first (behind all panels) */
     lv_obj_move_to_index(sg_wallpaper_img, 0);
 
-    /* Make screen bg transparent and panels semi-transparent so wallpaper shows through */
-    lv_obj_set_style_bg_opa(sg_ui.screen,      LV_OPA_TRANSP, 0);
-    lv_obj_set_style_bg_opa(sg_ui.top_bar,     LV_OPA_80,     0);
-    lv_obj_set_style_bg_opa(sg_ui.time_panel,  LV_OPA_70,     0);
-    lv_obj_set_style_bg_opa(sg_ui.info_panel,  LV_OPA_70,     0);
-    lv_obj_set_style_bg_opa(sg_ui.ai_panel,    LV_OPA_80,     0);
+    /* Make screen bg transparent so wallpaper shows through the glass panels */
+    lv_obj_set_style_bg_opa(sg_ui.screen, LV_OPA_TRANSP, 0);
 
     /* Free the superseded buffer while still holding the lock */
     if (old_pixels) {
