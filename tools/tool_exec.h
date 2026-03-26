@@ -14,7 +14,7 @@
 
 #include "tuya_cloud_types.h"
 #include "ai_mcp_server.h"
-
+#include "tuya_app_config.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
