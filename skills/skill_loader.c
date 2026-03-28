@@ -224,12 +224,12 @@ static void extract_description(TUYA_FILE f, char *out, size_t out_size)
         size_t len = strlen(line);
 
         if (len == 0 ||
-            (len == 1 && line[0] == '\n') ||
+            (len == 1 && line[0] == '\n' && off > 0) ||
             (len >= 2 && line[0] == '#' && line[1] == '#')) {
             break;
         }
 
-        if (off == 0 && line[0] == '\n') {
+        if (line[0] == '\n') {
             continue;
         }
 

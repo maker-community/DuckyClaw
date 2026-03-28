@@ -141,7 +141,7 @@ size_t context_build_system_prompt(char *buf, size_t size)
                     "- Listing/removing reminders -> cron_list / cron_remove\n"
                     "- Reading/writing/finding files -> read_file / write_file / find_path / list_dir\n"
                     "- Asking current time or date -> get_current_time\n"
-                    "- Searching the web -> web_search\n"
+                    "- Searching the web -> web_search\n\n"
                     "- Setting screen wallpaper/background from image URL -> set_wallpaper\n\n"
                     "## What You CANNOT Do (no tool exists)\n"
                     "- Control hardware beyond wallpaper (camera, volume, lights, motors). "
