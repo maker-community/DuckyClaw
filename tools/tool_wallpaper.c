@@ -23,6 +23,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <ctype.h>
 
 #if defined(ENABLE_COMP_AI_DISPLAY) && (ENABLE_COMP_AI_DISPLAY == 1)
 #if defined(ENABLE_AI_CHAT_CUSTOM_UI) && (ENABLE_AI_CHAT_CUSTOM_UI == 1)
@@ -58,6 +59,68 @@ typedef struct {
 /***********************************************************
 ***********************function define**********************
 ***********************************************************/
+
+static bool __str_ieq_n(const char *lhs, const char *rhs, size_t len)
+{
+    for (size_t i = 0; i < len; ++i) {
+        if (tolower((unsigned char)lhs[i]) != tolower((unsigned char)rhs[i])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool __normalize_wallpaper_url(char *url)
+{
+    if (!url || url[0] == '\0') {
+        return false;
+    }
+
+    char *query = strchr(url, '?');
+    char *fragment = strchr(url, '#');
+    char *path_end = query;
+
+    if (!path_end || (fragment && fragment < path_end)) {
+        path_end = fragment;
+    }
+    if (!path_end) {
+        path_end = url + strlen(url);
+    }
+
+    char *path_start = strstr(url, "://");
+    if (path_start) {
+        path_start = strchr(path_start + 3, '/');
+    } else {
+        path_start = strchr(url, '/');
+    }
+    if (!path_start || path_start >= path_end) {
+        path_start = url;
+    }
+
+    char *ext = NULL;
+    for (char *cursor = path_end; cursor > path_start; --cursor) {
+        char current = *(cursor - 1);
+        if (current == '.') {
+            ext = cursor - 1;
+            break;
+        }
+        if (current == '/') {
+            break;
+        }
+    }
+
+    if (!ext || (path_end - ext) != 4) {
+        return false;
+    }
+
+    if (!__str_ieq_n(ext, ".png", 4)) {
+        return false;
+    }
+
+    memcpy(ext, ".jpg", 4);
+    return true;
+}
 
 /**
  * @brief Background thread: download image from URL, save to FS and apply.
@@ -252,6 +315,9 @@ static OPERATE_RET __tool_set_wallpaper(const MCP_PROPERTY_LIST_T *properties,
     }
     strncpy(task_arg->url, url, sizeof(task_arg->url) - 1);
     task_arg->url[sizeof(task_arg->url) - 1] = '\0';
+    if (__normalize_wallpaper_url(task_arg->url)) {
+        PR_NOTICE("wallpaper: 检测到 PNG 链接，下载时改为 JPG: %s", task_arg->url);
+    }
 
     /* --- Spawn background download thread --- */
     THREAD_CFG_T cfg;
@@ -347,6 +413,9 @@ OPERATE_RET tool_wallpaper_restore(void)
     }
     strncpy(task_arg->url, (char *)url_buf, sizeof(task_arg->url) - 1);
     task_arg->url[sizeof(task_arg->url) - 1] = '\0';
+    if (__normalize_wallpaper_url(task_arg->url)) {
+        PR_NOTICE("wallpaper: 恢复到 PNG 链接，下载时改为 JPG: %s", task_arg->url);
+    }
     tal_kv_free(url_buf);
 
     THREAD_CFG_T cfg;

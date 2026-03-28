@@ -99,6 +99,70 @@ static lv_obj_t      *sg_wallpaper_img     = NULL;
 static uint8_t       *sg_wallpaper_pixels  = NULL;
 static lv_image_dsc_t sg_wallpaper_dsc;
 
+static void __wallpaper_calc_center_crop(uint16_t src_w, uint16_t src_h,
+                                         uint16_t dst_w, uint16_t dst_h,
+                                         uint16_t *crop_x, uint16_t *crop_y,
+                                         uint16_t *crop_w, uint16_t *crop_h)
+{
+    uint32_t src_ratio_lhs = (uint32_t)src_w * (uint32_t)dst_h;
+    uint32_t dst_ratio_rhs = (uint32_t)src_h * (uint32_t)dst_w;
+
+    if (src_ratio_lhs > dst_ratio_rhs) {
+        *crop_h = src_h;
+        *crop_w = (uint16_t)(((uint32_t)src_h * (uint32_t)dst_w) / (uint32_t)dst_h);
+        *crop_x = (uint16_t)((src_w - *crop_w) / 2u);
+        *crop_y = 0;
+        return;
+    }
+
+    *crop_w = src_w;
+    *crop_h = (uint16_t)(((uint32_t)src_w * (uint32_t)dst_h) / (uint32_t)dst_w);
+    *crop_x = 0;
+    *crop_y = (uint16_t)((src_h - *crop_h) / 2u);
+}
+
+static OPERATE_RET __wallpaper_crop_and_scale_rgb565(const uint8_t *src_pixels,
+                                                     uint16_t src_w, uint16_t src_h,
+                                                     uint16_t dst_w, uint16_t dst_h,
+                                                     uint8_t **dst_pixels_out)
+{
+    uint16_t crop_x = 0;
+    uint16_t crop_y = 0;
+    uint16_t crop_w = 0;
+    uint16_t crop_h = 0;
+    uint32_t dst_pixels_size = (uint32_t)dst_w * (uint32_t)dst_h * 2u;
+    uint16_t *dst_pixels = NULL;
+    const uint16_t *src_rgb565 = (const uint16_t *)src_pixels;
+
+    if (!src_pixels || !dst_pixels_out || src_w == 0 || src_h == 0 || dst_w == 0 || dst_h == 0) {
+        return OPRT_INVALID_PARM;
+    }
+
+    __wallpaper_calc_center_crop(src_w, src_h, dst_w, dst_h,
+                                 &crop_x, &crop_y, &crop_w, &crop_h);
+
+    dst_pixels = (uint16_t *)tal_malloc(dst_pixels_size);
+    if (!dst_pixels) {
+        return OPRT_MALLOC_FAILED;
+    }
+
+    for (uint16_t y = 0; y < dst_h; ++y) {
+        uint32_t src_y = crop_y + ((uint32_t)y * (uint32_t)crop_h) / (uint32_t)dst_h;
+        const uint16_t *src_row = src_rgb565 + (src_y * (uint32_t)src_w);
+        uint16_t *dst_row = dst_pixels + ((uint32_t)y * (uint32_t)dst_w);
+
+        for (uint16_t x = 0; x < dst_w; ++x) {
+            uint32_t src_x = crop_x + ((uint32_t)x * (uint32_t)crop_w) / (uint32_t)dst_w;
+            dst_row[x] = src_row[src_x];
+        }
+    }
+
+    *dst_pixels_out = (uint8_t *)dst_pixels;
+    PR_NOTICE("wallpaper: center crop %ux%u+%u+%u -> screen %ux%u",
+              crop_w, crop_h, crop_x, crop_y, dst_w, dst_h);
+    return OPRT_OK;
+}
+
 /* Load persisted wallpaper from filesystem and apply to screen.
  * Only active on SD card builds — SPIFFS restore is handled by
  * tool_wallpaper_restore() after MQTT connects. */
@@ -605,6 +669,9 @@ OPERATE_RET ducky_custom_ui_set_wallpaper(const uint8_t *data, uint32_t size)
     if (!data || size == 0) return OPRT_INVALID_PARM;
 
 #if defined(ENABLE_COMP_AI_PICTURE) && (ENABLE_COMP_AI_PICTURE == 1)
+    uint16_t target_w = (uint16_t)LV_HOR_RES;
+    uint16_t target_h = (uint16_t)LV_VER_RES;
+
     /* ── Decode JPEG → RGB565 using T5AI hardware JPEG decoder ── */
     TKL_JPEG_CODEC_INFO_T info;
     memset(&info, 0, sizeof(info));
@@ -620,7 +687,8 @@ OPERATE_RET ducky_custom_ui_set_wallpaper(const uint8_t *data, uint32_t size)
         return OPRT_INVALID_PARM;
     }
 
-    uint32_t pixels_size = (uint32_t)info.out_width * (uint32_t)info.out_height * 2u; /* RGB565 */
+    uint32_t decoded_pixels_size = (uint32_t)info.out_width * (uint32_t)info.out_height * 2u; /* RGB565 */
+    uint32_t wallpaper_pixels_size = (uint32_t)target_w * (uint32_t)target_h * 2u;
 
     /* ── Free old buffer first to reclaim memory before allocating new one ── */
     lv_vendor_disp_lock();
@@ -633,17 +701,28 @@ OPERATE_RET ducky_custom_ui_set_wallpaper(const uint8_t *data, uint32_t size)
     }
     lv_vendor_disp_unlock();
 
-    uint8_t *new_pixels = (uint8_t *)tal_malloc(pixels_size);
-    if (!new_pixels) {
-        PR_ERR("wallpaper: malloc failed for %u bytes", pixels_size);
+    uint8_t *decoded_pixels = (uint8_t *)tal_malloc(decoded_pixels_size);
+    if (!decoded_pixels) {
+        PR_ERR("wallpaper: malloc failed for %u bytes", decoded_pixels_size);
         return OPRT_MALLOC_FAILED;
     }
 
     info.in_size = size;
-    rt = tkl_jpeg_codec_convert((uint8_t *)data, new_pixels, &info, JPEG_DEC_OUT_RGB565);
+    rt = tkl_jpeg_codec_convert((uint8_t *)data, decoded_pixels, &info, JPEG_DEC_OUT_RGB565);
     if (rt != OPRT_OK) {
         PR_ERR("wallpaper: tkl_jpeg_codec_convert failed: %d", rt);
-        tal_free(new_pixels);
+        tal_free(decoded_pixels);
+        return rt;
+    }
+
+    uint8_t *new_pixels = NULL;
+    rt = __wallpaper_crop_and_scale_rgb565(decoded_pixels,
+                                           info.out_width, info.out_height,
+                                           target_w, target_h,
+                                           &new_pixels);
+    tal_free(decoded_pixels);
+    if (rt != OPRT_OK) {
+        PR_ERR("wallpaper: crop/scale failed: %d", rt);
         return rt;
     }
 
@@ -655,10 +734,10 @@ OPERATE_RET ducky_custom_ui_set_wallpaper(const uint8_t *data, uint32_t size)
     memset(&sg_wallpaper_dsc, 0, sizeof(sg_wallpaper_dsc));
     sg_wallpaper_dsc.header.magic  = LV_IMAGE_HEADER_MAGIC;
     sg_wallpaper_dsc.header.cf     = LV_COLOR_FORMAT_RGB565;
-    sg_wallpaper_dsc.header.w      = info.out_width;
-    sg_wallpaper_dsc.header.h      = info.out_height;
-    sg_wallpaper_dsc.header.stride = (uint32_t)info.out_width * 2u;
-    sg_wallpaper_dsc.data_size     = pixels_size;
+    sg_wallpaper_dsc.header.w      = target_w;
+    sg_wallpaper_dsc.header.h      = target_h;
+    sg_wallpaper_dsc.header.stride = (uint32_t)target_w * 2u;
+    sg_wallpaper_dsc.data_size     = wallpaper_pixels_size;
     sg_wallpaper_dsc.data          = sg_wallpaper_pixels;
 
     /* Create or update background image widget */
@@ -677,7 +756,8 @@ OPERATE_RET ducky_custom_ui_set_wallpaper(const uint8_t *data, uint32_t size)
 
     lv_vendor_disp_unlock();
 
-    PR_NOTICE("wallpaper: applied %ux%u image to background", info.out_width, info.out_height);
+    PR_NOTICE("wallpaper: applied %ux%u image as %ux%u portrait wallpaper",
+              info.out_width, info.out_height, target_w, target_h);
     return OPRT_OK;
 #else
     /* No hardware JPEG decoder on this platform — image was saved to FS only */
