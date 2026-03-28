@@ -37,7 +37,7 @@
 ***********************************************************/
 
 /* Maximum wallpaper file size (256 KB is generous for a compressed JPEG) */
-#define WALLPAPER_MAX_SIZE    (256 * 1024)
+#define WALLPAPER_MAX_SIZE    (512 * 1024)
 #define WALLPAPER_CHUNK_SIZE  1024
 
 /* KV key used to persist the wallpaper URL when SD card is not available */
