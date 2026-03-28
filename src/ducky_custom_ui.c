@@ -47,6 +47,8 @@
 #define DUCKY_INFO_H      172 /* 2 rows of 80px cards + 12px gap */
 #define DUCKY_CARD_W      ((LV_HOR_RES - (DUCKY_MARGIN * 2) - 12) / 2)
 #define DUCKY_CARD_H      80
+#define DUCKY_DOUBLE_TAP_MS        400
+#define DUCKY_DOUBLE_TAP_DISTANCE  36
 
 /* ── Extended display type IDs ── */
 typedef enum {
@@ -89,6 +91,9 @@ typedef struct {
 
 static DUCKY_CUSTOM_UI_T sg_ui;
 static bool              sg_is_streaming    = false;
+static bool              sg_ui_hidden       = false;
+static uint32_t          sg_last_tap_tick   = 0;
+static lv_point_t        sg_last_tap_point  = {0, 0};
 static lv_timer_t       *sg_notification_tm = NULL;
 static lv_timer_t       *sg_clock_tm        = NULL;
 static lv_timer_t       *sg_sys_poll_tm     = NULL;
@@ -225,6 +230,65 @@ static void __notification_timeout_cb(lv_timer_t *timer)
     lv_obj_clear_flag(sg_ui.status_label, LV_OBJ_FLAG_HIDDEN);
 }
 
+static void __set_ui_overlay_hidden(bool hidden)
+{
+    if (!sg_ui.screen) return;
+
+    sg_ui_hidden = hidden;
+
+    if (sg_ui.top_bar) {
+        if (hidden) lv_obj_add_flag(sg_ui.top_bar, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_clear_flag(sg_ui.top_bar, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    if (sg_ui.time_panel) {
+        if (hidden) lv_obj_add_flag(sg_ui.time_panel, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_clear_flag(sg_ui.time_panel, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    if (sg_ui.info_panel) {
+        if (hidden) lv_obj_add_flag(sg_ui.info_panel, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_clear_flag(sg_ui.info_panel, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    if (sg_ui.ai_panel) {
+        if (hidden) lv_obj_add_flag(sg_ui.ai_panel, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_clear_flag(sg_ui.ai_panel, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    PR_NOTICE("ui: overlay %s by double tap", hidden ? "hidden" : "shown");
+}
+
+static void __screen_double_tap_event_cb(lv_event_t *e)
+{
+    lv_indev_t *indev = lv_event_get_indev(e);
+    lv_point_t point = {0, 0};
+    uint32_t elapsed = 0;
+    int32_t dx = 0;
+    int32_t dy = 0;
+
+    if (!indev) {
+        return;
+    }
+
+    lv_indev_get_point(indev, &point);
+    elapsed = lv_tick_elaps(sg_last_tap_tick);
+    dx = point.x - sg_last_tap_point.x;
+    dy = point.y - sg_last_tap_point.y;
+
+    if (sg_last_tap_tick != 0 &&
+        elapsed <= DUCKY_DOUBLE_TAP_MS &&
+        dx >= -DUCKY_DOUBLE_TAP_DISTANCE && dx <= DUCKY_DOUBLE_TAP_DISTANCE &&
+        dy >= -DUCKY_DOUBLE_TAP_DISTANCE && dy <= DUCKY_DOUBLE_TAP_DISTANCE) {
+        sg_last_tap_tick = 0;
+        __set_ui_overlay_hidden(!sg_ui_hidden);
+        return;
+    }
+
+    sg_last_tap_tick = lv_tick_get();
+    sg_last_tap_point = point;
+}
+
 /* Poll cron job count and heartbeat status every 15 s */
 static void __sys_poll_cb(lv_timer_t *timer)
 {
@@ -283,7 +347,7 @@ static lv_obj_t *__make_card(lv_obj_t *parent, int w, int h,
     __apply_glass_style(card, 16);
     lv_obj_set_style_pad_all(card, 10, 0);
     lv_obj_set_scrollbar_mode(card, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *icon = lv_label_create(card);
     lv_obj_set_style_text_font(icon, ai_ui_get_icon_font(), 0);
@@ -337,6 +401,8 @@ static OPERATE_RET __ui_init(void)
     lv_obj_set_style_bg_opa(sg_ui.screen, LV_OPA_COVER, 0);
     lv_obj_set_style_text_color(sg_ui.screen, lv_color_white(), 0);
     lv_obj_set_style_pad_all(sg_ui.screen, 0, 0);
+    lv_obj_add_flag(sg_ui.screen, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(sg_ui.screen, __screen_double_tap_event_cb, LV_EVENT_SHORT_CLICKED, NULL);
 
     /* ── TOP STATUS BAR ── */
     sg_ui.top_bar = lv_obj_create(sg_ui.screen);
@@ -344,7 +410,7 @@ static OPERATE_RET __ui_init(void)
     lv_obj_align(sg_ui.top_bar, LV_ALIGN_TOP_MID, 0, DUCKY_MARGIN);
     __apply_glass_style(sg_ui.top_bar, DUCKY_TOP_BAR_H / 2);
     lv_obj_set_style_pad_all(sg_ui.top_bar, 0, 0);
-    lv_obj_clear_flag(sg_ui.top_bar, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(sg_ui.top_bar, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
     sg_ui.chat_mode_label = lv_label_create(sg_ui.top_bar);
     lv_label_set_text(sg_ui.chat_mode_label, "Chat");
@@ -381,7 +447,7 @@ static OPERATE_RET __ui_init(void)
     lv_obj_align(sg_ui.time_panel, LV_ALIGN_TOP_MID, 0, DUCKY_MARGIN + DUCKY_TOP_BAR_H + DUCKY_MARGIN);
     __apply_glass_style(sg_ui.time_panel, 16);
     lv_obj_set_style_pad_all(sg_ui.time_panel, 12, 0);
-    lv_obj_clear_flag(sg_ui.time_panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(sg_ui.time_panel, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
     sg_ui.time_label = lv_label_create(sg_ui.time_panel);
     lv_obj_set_style_text_color(sg_ui.time_label, lv_color_white(), 0);
@@ -413,7 +479,7 @@ static OPERATE_RET __ui_init(void)
     lv_obj_set_style_pad_row(sg_ui.info_panel, 12, 0);
     lv_obj_set_style_pad_column(sg_ui.info_panel, 12, 0);
     lv_obj_set_flex_flow(sg_ui.info_panel, LV_FLEX_FLOW_ROW_WRAP);
-    lv_obj_clear_flag(sg_ui.info_panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(sg_ui.info_panel, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
     __make_card(sg_ui.info_panel, DUCKY_CARD_W, DUCKY_CARD_H, &sg_ui.horoscope_body,
                 FONT_AWESOME_EMOJI_HAPPY, lv_color_hex(0xFF9F0A), "星座", "运势加载中…");
@@ -433,7 +499,7 @@ static OPERATE_RET __ui_init(void)
     lv_obj_align(sg_ui.ai_panel, LV_ALIGN_BOTTOM_MID, 0, -DUCKY_MARGIN);
     __apply_glass_style(sg_ui.ai_panel, 16);
     lv_obj_set_style_pad_all(sg_ui.ai_panel, 12, 0);
-    lv_obj_clear_flag(sg_ui.ai_panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(sg_ui.ai_panel, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *ai_icon = lv_label_create(sg_ui.ai_panel);
     lv_obj_set_style_text_font(ai_icon, ai_ui_get_icon_font(), 0);
@@ -453,6 +519,8 @@ static OPERATE_RET __ui_init(void)
     lv_obj_set_style_text_color(sg_ui.ai_msg_label, lv_color_white(), 0);
     lv_label_set_text(sg_ui.ai_msg_label, "DuckyClaw 已就绪\n有什么可以帮你？");
     lv_obj_align(sg_ui.ai_msg_label, LV_ALIGN_TOP_LEFT, 0, 24);
+
+    __set_ui_overlay_hidden(false);
 
     lv_vendor_disp_unlock();
 
