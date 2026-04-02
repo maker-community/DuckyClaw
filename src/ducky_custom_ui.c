@@ -24,10 +24,16 @@
 #include "font_awesome_symbols.h"
 #include "cron_service.h"
 
+#if defined(ENABLE_COMP_AI_VIDEO) && (ENABLE_COMP_AI_VIDEO == 1)
+#include "tdl_display_manage.h"
+#include "lv_port_disp.h"
+#endif
+
 #include "ducky_custom_ui.h"
 
 #if defined(ENABLE_COMP_AI_PICTURE) && (ENABLE_COMP_AI_PICTURE == 1)
 #include "tkl_jpeg_codec.h"
+#include "tal_image_rotate.h"
 #include "tool_files.h"
 
 /* SD card: save/restore JPEG file directly.
@@ -98,11 +104,46 @@ static lv_timer_t       *sg_notification_tm = NULL;
 static lv_timer_t       *sg_clock_tm        = NULL;
 static lv_timer_t       *sg_sys_poll_tm     = NULL;
 
+/* ── Shared display rotation config for camera preview and static photo ── */
+#if (defined(CONFIG_AI_DISP_VIDEO_ROTATION_0) && (CONFIG_AI_DISP_VIDEO_ROTATION_0 == 1)) || \
+    (defined(AI_DISP_VIDEO_ROTATION_0) && (AI_DISP_VIDEO_ROTATION_0 == 1))
+#define AI_DISP_VIDEO_ROTATION TUYA_DISPLAY_ROTATION_0
+#elif (defined(CONFIG_AI_DISP_VIDEO_ROTATION_90) && (CONFIG_AI_DISP_VIDEO_ROTATION_90 == 1)) || \
+    (defined(AI_DISP_VIDEO_ROTATION_90) && (AI_DISP_VIDEO_ROTATION_90 == 1))
+#define AI_DISP_VIDEO_ROTATION TUYA_DISPLAY_ROTATION_90
+#elif (defined(CONFIG_AI_DISP_VIDEO_ROTATION_180) && (CONFIG_AI_DISP_VIDEO_ROTATION_180 == 1)) || \
+    (defined(AI_DISP_VIDEO_ROTATION_180) && (AI_DISP_VIDEO_ROTATION_180 == 1))
+#define AI_DISP_VIDEO_ROTATION TUYA_DISPLAY_ROTATION_180
+#elif (defined(CONFIG_AI_DISP_VIDEO_ROTATION_270) && (CONFIG_AI_DISP_VIDEO_ROTATION_270 == 1)) || \
+    (defined(AI_DISP_VIDEO_ROTATION_270) && (AI_DISP_VIDEO_ROTATION_270 == 1))
+#define AI_DISP_VIDEO_ROTATION TUYA_DISPLAY_ROTATION_270
+#else
+#define AI_DISP_VIDEO_ROTATION TUYA_DISPLAY_ROTATION_0
+#endif
+
+/* ── Camera direct-display state ── */
+#if defined(ENABLE_COMP_AI_VIDEO) && (ENABLE_COMP_AI_VIDEO == 1)
+
+typedef struct {
+    TDL_DISP_DEV_INFO_T    disp_info;
+    TDL_DISP_HANDLE_T      disp_handle;
+    TDL_FB_MANAGE_HANDLE_T fb_manage;
+    bool                   is_disp_start;
+} DUCKY_DISP_CAMERA_T;
+
+static DUCKY_DISP_CAMERA_T sg_disp_camera = {0};
+#endif /* ENABLE_COMP_AI_VIDEO */
+
 /* ── Wallpaper state ── */
 #if defined(ENABLE_COMP_AI_PICTURE) && (ENABLE_COMP_AI_PICTURE == 1)
 static lv_obj_t      *sg_wallpaper_img     = NULL;
 static uint8_t       *sg_wallpaper_pixels  = NULL;
 static lv_image_dsc_t sg_wallpaper_dsc;
+
+/* Transient picture overlay (from AI picture download) */
+static lv_obj_t   *sg_picture_canvas  = NULL;
+static uint8_t    *sg_picture_buf     = NULL;
+static lv_timer_t *sg_picture_hide_tm = NULL;
 
 static void __wallpaper_calc_center_crop(uint16_t src_w, uint16_t src_h,
                                          uint16_t dst_w, uint16_t dst_h,
@@ -216,6 +257,199 @@ static void __wallpaper_restore(void)
 #endif
 }
 #endif
+
+/* ── Camera display callbacks (direct hardware path, bypasses LVGL) ── */
+#if defined(ENABLE_COMP_AI_VIDEO) && (ENABLE_COMP_AI_VIDEO == 1)
+
+static OPERATE_RET __disp_camera_start(uint16_t width, uint16_t height)
+{
+    OPERATE_RET rt = OPRT_OK;
+
+    if (0 == width || 0 == height) {
+        PR_ERR("camera: invalid dimensions %ux%u", width, height);
+        return OPRT_INVALID_PARM;
+    }
+
+    sg_disp_camera.disp_handle = tdl_disp_find_dev(DISPLAY_NAME);
+    tdl_disp_dev_get_info(sg_disp_camera.disp_handle, &sg_disp_camera.disp_info);
+
+    if (NULL == sg_disp_camera.fb_manage) {
+        TUYA_CALL_ERR_RETURN(tdl_disp_fb_manage_init(&sg_disp_camera.fb_manage));
+        for (uint8_t i = 0; i < 2; i++) {
+            TUYA_CALL_ERR_RETURN(tdl_disp_fb_manage_add(sg_disp_camera.fb_manage,
+                                                        sg_disp_camera.disp_info.fmt,
+                                                        sg_disp_camera.disp_info.width,
+                                                        sg_disp_camera.disp_info.height));
+        }
+    }
+
+    /* Pause LVGL rendering while camera writes to display hardware directly */
+    disp_disable_update(NULL);
+    sg_disp_camera.is_disp_start = true;
+    PR_NOTICE("camera display started %ux%u, rotation=%d", width, height, AI_DISP_VIDEO_ROTATION);
+    return OPRT_OK;
+}
+
+static OPERATE_RET __disp_camera_flush(uint8_t *data, uint16_t width, uint16_t height)
+{
+    OPERATE_RET rt = OPRT_OK;
+    TDL_DISP_FRAME_BUFF_T *convert_fb = NULL;
+
+    if (false == sg_disp_camera.is_disp_start) {
+        return OPRT_COM_ERROR;
+    }
+
+    convert_fb = tdl_disp_get_free_fb(sg_disp_camera.fb_manage);
+    TUYA_CHECK_NULL_RETURN(convert_fb, OPRT_COM_ERROR);
+
+    TUYA_CALL_ERR_LOG(tdl_disp_convert_yuv422_to_fb(data, width, height,
+                                                    convert_fb,
+                                                    sg_disp_camera.disp_info.is_swap,
+                                                    AI_DISP_VIDEO_ROTATION));
+    tdl_disp_dev_flush(sg_disp_camera.disp_handle, convert_fb);
+    return OPRT_OK;
+}
+
+static OPERATE_RET __disp_camera_end(void)
+{
+    sg_disp_camera.is_disp_start = false;
+    /* Resume LVGL rendering */
+    disp_enable_update(NULL);
+    PR_NOTICE("camera display ended");
+    return OPRT_OK;
+}
+#endif /* ENABLE_COMP_AI_VIDEO */
+
+/* ── Transient picture overlay ── */
+#if defined(ENABLE_COMP_AI_PICTURE) && (ENABLE_COMP_AI_PICTURE == 1)
+
+static void __picture_hide_cb(lv_timer_t *timer)
+{
+    (void)timer;
+    lv_timer_del(sg_picture_hide_tm);
+    sg_picture_hide_tm = NULL;
+    if (sg_picture_canvas) {
+        lv_obj_add_flag(sg_picture_canvas, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void __picture_click_cb(lv_event_t *e)
+{
+    (void)e;
+    if (sg_picture_hide_tm) {
+        lv_timer_del(sg_picture_hide_tm);
+        sg_picture_hide_tm = NULL;
+    }
+    if (sg_picture_canvas) {
+        lv_obj_add_flag(sg_picture_canvas, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static OPERATE_RET __picture_rotate_rgb565(const uint8_t *src,
+                                           uint16_t src_w,
+                                           uint16_t src_h,
+                                           uint8_t **dst,
+                                           uint16_t *dst_w,
+                                           uint16_t *dst_h)
+{
+    uint32_t pixel_count = 0;
+    uint32_t buffer_size = 0;
+    const uint16_t *src_pixels = NULL;
+    uint16_t *dst_pixels = NULL;
+
+    if (!src || !dst || !dst_w || !dst_h || src_w == 0 || src_h == 0) {
+        return OPRT_INVALID_PARM;
+    }
+
+    pixel_count = (uint32_t)src_w * (uint32_t)src_h;
+    buffer_size = pixel_count * sizeof(uint16_t);
+    src_pixels = (const uint16_t *)src;
+    dst_pixels = (uint16_t *)tal_malloc(buffer_size);
+    if (!dst_pixels) {
+        return OPRT_MALLOC_FAILED;
+    }
+
+    switch (AI_DISP_VIDEO_ROTATION) {
+    case TUYA_DISPLAY_ROTATION_90:
+        *dst_w = src_h;
+        *dst_h = src_w;
+        tal_image_rgb565_rotate90((uint16_t *)src_pixels, dst_pixels, src_w, src_h, false);
+        break;
+    case TUYA_DISPLAY_ROTATION_180:
+        *dst_w = src_w;
+        *dst_h = src_h;
+        tal_image_rgb565_rotate180((uint16_t *)src_pixels, dst_pixels, src_w, src_h, false);
+        break;
+    case TUYA_DISPLAY_ROTATION_270:
+        *dst_w = src_h;
+        *dst_h = src_w;
+        tal_image_rgb565_rotate270((uint16_t *)src_pixels, dst_pixels, src_w, src_h, false);
+        break;
+    case TUYA_DISPLAY_ROTATION_0:
+    default:
+        *dst_w = src_w;
+        *dst_h = src_h;
+        memcpy(dst_pixels, src_pixels, buffer_size);
+        break;
+    }
+
+    *dst = (uint8_t *)dst_pixels;
+    return OPRT_OK;
+}
+
+static OPERATE_RET __disp_picture(TUYA_FRAME_FMT_E fmt, uint16_t width, uint16_t height,
+                                   uint8_t *data, uint32_t len)
+{
+    OPERATE_RET rt = OPRT_OK;
+    uint8_t *rotated_buf = NULL;
+    uint16_t display_w = 0;
+    uint16_t display_h = 0;
+
+    if (fmt != TUYA_FRAME_FMT_RGB565) {
+        PR_ERR("picture: unsupported fmt %d", fmt);
+        return OPRT_NOT_SUPPORTED;
+    }
+
+    rt = __picture_rotate_rgb565(data, width, height, &rotated_buf, &display_w, &display_h);
+    if (rt != OPRT_OK) {
+        PR_ERR("picture: rotate failed %d", rt);
+        return rt;
+    }
+
+    lv_vendor_disp_lock();
+
+    /* Replace previous buffer */
+    if (sg_picture_buf) {
+        tal_free(sg_picture_buf);
+        sg_picture_buf = NULL;
+    }
+    sg_picture_buf = rotated_buf;
+
+    /* Re-create canvas widget */
+    if (sg_picture_canvas) {
+        lv_obj_delete(sg_picture_canvas);
+        sg_picture_canvas = NULL;
+    }
+    sg_picture_canvas = lv_canvas_create(sg_ui.screen);
+    lv_canvas_set_buffer(sg_picture_canvas, sg_picture_buf, display_w, display_h, LV_COLOR_FORMAT_RGB565);
+    lv_obj_set_size(sg_picture_canvas, display_w, display_h);
+    lv_obj_center(sg_picture_canvas);
+    lv_obj_add_flag(sg_picture_canvas, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(sg_picture_canvas, __picture_click_cb, LV_EVENT_CLICKED, NULL);
+
+    /* Auto-dismiss after 5 s, or tap to dismiss early */
+    if (sg_picture_hide_tm) {
+        lv_timer_reset(sg_picture_hide_tm);
+    } else {
+        sg_picture_hide_tm = lv_timer_create(__picture_hide_cb, 5000, NULL);
+    }
+
+    lv_vendor_disp_unlock();
+    PR_NOTICE("picture: displaying %ux%u RGB565 image as %ux%u after rotation=%d (tap or 5s to dismiss)",
+              width, height, display_w, display_h, AI_DISP_VIDEO_ROTATION);
+    return OPRT_OK;
+}
+#endif /* ENABLE_COMP_AI_PICTURE */
 
 /* ── Helpers ── */
 
@@ -685,6 +919,16 @@ OPERATE_RET ducky_custom_ui_register(void)
     intfs.disp_wifi_state          = __ui_disp_wifi_state;
     intfs.disp_ai_chat_mode        = __ui_disp_chat_mode;
     intfs.disp_other_msg           = __ui_disp_other_msg;
+
+#if defined(ENABLE_COMP_AI_VIDEO) && (ENABLE_COMP_AI_VIDEO == 1)
+    intfs.disp_camera_start        = __disp_camera_start;
+    intfs.disp_camera_flush        = __disp_camera_flush;
+    intfs.disp_camera_end          = __disp_camera_end;
+#endif
+
+#if defined(ENABLE_COMP_AI_PICTURE) && (ENABLE_COMP_AI_PICTURE == 1)
+    intfs.disp_picture             = __disp_picture;
+#endif
 
     return ai_ui_register(&intfs);
 }

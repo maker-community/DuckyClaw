@@ -19,6 +19,14 @@
 #include "ai_video_input.h"
 #endif
 
+#if defined(ENABLE_COMP_AI_PICTURE) && (ENABLE_COMP_AI_PICTURE == 1)
+#include "ai_picture_convert.h"
+#endif
+
+#if defined(ENABLE_COMP_AI_DISPLAY) && (ENABLE_COMP_AI_DISPLAY == 1)
+#include "ai_ui_manage.h"
+#endif
+
 #include "ai_mcp_server.h"
 
 #include "ai_mcp.h"
@@ -68,6 +76,12 @@ static OPERATE_RET __take_photo(const MCP_PROPERTY_LIST_T *properties, MCP_RETUR
     uint8_t *image_data = NULL;
     uint32_t image_size = 0;
 
+#if defined(ENABLE_COMP_AI_PICTURE) && (ENABLE_COMP_AI_PICTURE == 1) && \
+    defined(ENABLE_COMP_AI_DISPLAY) && (ENABLE_COMP_AI_DISPLAY == 1)
+    AI_PICTURE_INFO_T picture_info;
+    memset(&picture_info, 0, sizeof(picture_info));
+#endif
+
     TUYA_CALL_ERR_LOG(ai_video_display_start());
 
     tal_system_sleep(3000);
@@ -85,9 +99,33 @@ static OPERATE_RET __take_photo(const MCP_PROPERTY_LIST_T *properties, MCP_RETUR
         return rt;
     }
 
-    ai_video_jpeg_image_free(&image_data);
-
     TUYA_CALL_ERR_LOG(ai_video_display_stop());
+
+#if defined(ENABLE_COMP_AI_PICTURE) && (ENABLE_COMP_AI_PICTURE == 1) && \
+    defined(ENABLE_COMP_AI_DISPLAY) && (ENABLE_COMP_AI_DISPLAY == 1)
+    AI_PICTURE_CONVERT_CFG_T convert_cfg = {
+        .in_fmt = TUYA_FRAME_FMT_JPEG,
+        .in_frame_size = image_size,
+        .out_fmt = TUYA_FRAME_FMT_RGB565,
+    };
+
+    rt = ai_picture_convert_start(&convert_cfg);
+    if (rt == OPRT_OK) {
+        TUYA_CALL_ERR_LOG(ai_picture_convert_feed(image_data, image_size));
+        rt = ai_picture_convert(&picture_info);
+        if (rt == OPRT_OK) {
+            TUYA_CALL_ERR_LOG(ai_ui_disp_picture(picture_info.fmt, picture_info.width, picture_info.height,
+                                                picture_info.frame, picture_info.frame_size));
+        } else {
+            PR_ERR("convert local picture err, rt:%d", rt);
+        }
+        TUYA_CALL_ERR_LOG(ai_picture_convert_stop());
+    } else {
+        PR_ERR("start local picture convert err, rt:%d", rt);
+    }
+#endif
+
+    ai_video_jpeg_image_free(&image_data);
 
     return OPRT_OK;
 }
