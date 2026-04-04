@@ -5,6 +5,7 @@ rsource "./cron_service/Kconfig"
 rsource "./gateway/Kconfig"
 rsource "./IM/Kconfig"
 rsource "./agent/Kconfig"
+rsource "./battery/Kconfig"
 rsource "./tools/Kconfig"
 
 endmenu

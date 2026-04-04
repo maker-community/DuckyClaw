@@ -18,6 +18,7 @@ aux_source_directory(${APP_PATH}/memory APP_SRCS)
 aux_source_directory(${APP_PATH}/gateway APP_SRCS)
 aux_source_directory(${APP_PATH}/skills APP_SRCS)
 aux_source_directory(${APP_PATH}/agent APP_SRCS)
+aux_source_directory(${APP_PATH}/battery APP_SRCS)
 
 # APP_INC
 set(APP_INC
@@ -30,6 +31,7 @@ set(APP_INC
     ${APP_PATH}/gateway
     ${APP_PATH}/skills
     ${APP_PATH}/agent
+    ${APP_PATH}/battery
     ${APP_PATH}/ai_components/assets/include
 )
 

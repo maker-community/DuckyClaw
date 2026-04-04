@@ -40,6 +40,9 @@
 #endif
 
 #include "board_com_api.h"
+#if defined(ENABLE_BATTERY_MONITOR) && (ENABLE_BATTERY_MONITOR == 1)
+#include "bq27220.h"
+#endif
 
 #include "ducky_claw_chat.h"
 #include "reset_netcfg.h"
@@ -51,6 +54,19 @@
 
 #if defined(ENABLE_QRCODE) && (ENABLE_QRCODE == 1)
 #include "qrencode_print.h"
+#endif
+
+/* Deferred BQ27220 timer handle */
+#if defined(ENABLE_BATTERY_MONITOR) && (ENABLE_BATTERY_MONITOR == 1)
+static TIMER_ID sg_bq27220_init_timer = NULL;
+
+static void __bq27220_delayed_init_cb(TIMER_ID timer_id, void *arg)
+{
+    OPERATE_RET ret = bq27220_init();
+    if (ret != OPRT_OK) {
+        PR_WARN("bq27220_init failed rt:%d (no battery monitor)", ret);
+    }
+}
 #endif
 
 /* Tuya device handle */
@@ -393,6 +409,12 @@ void user_main(void)
 
     /* Start tuya iot task */
     tuya_iot_start(&ai_client);
+
+#if defined(ENABLE_BATTERY_MONITOR) && (ENABLE_BATTERY_MONITOR == 1)
+    /* Defer BQ27220 init until after WiFi/BLE stack is fully settled (~3s) */
+    tal_sw_timer_create(__bq27220_delayed_init_cb, NULL, &sg_bq27220_init_timer);
+    tal_sw_timer_start(sg_bq27220_init_timer, 3000, TAL_TIMER_ONCE);
+#endif
 
     tkl_wifi_set_lp_mode(0, 0);
 

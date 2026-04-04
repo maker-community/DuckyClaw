@@ -1,0 +1,34 @@
+menuconfig ENABLE_BATTERY_MONITOR
+    bool "Enable battery monitor (BQ27220)"
+    default y
+    help
+        Enable BQ27220 battery gauge initialization and reporting.
+
+if ENABLE_BATTERY_MONITOR
+
+menu "Battery Monitor Config"
+    config BATTERY_MONITOR_INTERVAL_S
+        int "Battery monitor refresh interval (seconds)"
+        default 60
+        range 1 3600
+        help
+            Polling or refresh interval for battery status logic.
+
+    config BATTERY_MONITOR_LOW_THRESHOLD_PCT
+        int "Low battery threshold (percent)"
+        default 15
+        range 1 100
+        help
+            Battery level threshold considered low.
+
+    config BATTERY_MONITOR_DESIGN_CAPACITY_MAH
+        int "Battery design capacity (mAh)"
+        default 1000
+        range 100 20000
+        help
+            Nominal battery pack capacity written to BQ27220 Data Memory.
+            Change this when using a different battery pack so the gauge model
+            starts from the correct design capacity.
+endmenu
+
+endif
