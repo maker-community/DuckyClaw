@@ -44,12 +44,18 @@
 #include "bq27220.h"
 #endif
 
+#if defined(ENABLE_BLUETOOTH) && (ENABLE_BLUETOOTH == 1)
+#include "netcfg.h"
+#include "ble_mgr.h"
+#endif
+
 #include "ducky_claw_chat.h"
 #include "reset_netcfg.h"
 #include "app_im.h"
 #include "cli/serial_cli.h"
 #include "tools_register.h"
 #include "ws_server.h"
+#include "acp_client.h"
 #include "agent_loop.h"
 
 #if defined(ENABLE_QRCODE) && (ENABLE_QRCODE == 1)
@@ -211,7 +217,26 @@ void user_event_handler_on(tuya_iot_client_t *client, tuya_event_msg_t *event)
 
     /* MQTT with tuya cloud is connected, device online */
     case TUYA_EVENT_MQTT_CONNECTED:
+#if defined(PLATFORM_ESP32) && (PLATFORM_ESP32 == 1)
+        /* NOTE: this is for ESP32 only */
+        uint32_t free_heap = tal_system_get_free_heap_size();
+        PR_INFO("BLE init Free heap size:%d", free_heap);
+        netcfg_stop(NETCFG_TUYA_BLE);
+        tuya_ble_deinit();
+        free_heap = tal_system_get_free_heap_size();
+        PR_INFO("BLE deinit Free heap size:%d", free_heap);
+#endif
         PR_INFO("Device MQTT Connected!");
+        NW_IP_S ip;
+        memset(&ip, 0, sizeof(ip));
+#if defined(ENABLE_WIFI) && (ENABLE_WIFI == 1)
+        OPERATE_RET op_ret = tal_wifi_get_ip(WF_STATION, &ip);
+        // PR_INFO("device init ip=%s", ip.ip);
+        if (OPRT_OK != op_ret) {
+            PR_ERR("get ip fail:%d", op_ret);
+            op_ret = OPRT_NOT_FOUND;
+        }
+#endif
         tal_event_publish(EVENT_MQTT_CONNECTED, NULL);
 
         static uint8_t first = 1;
@@ -332,9 +357,11 @@ void user_main(void)
     tal_sw_timer_init();
     tal_workq_init();
     tal_time_service_init();
+#if !defined(PLATFORM_ESP32)
     tal_cli_init();
     tuya_app_cli_init();
     serial_cli_init();
+#endif
     tuya_authorize_init();
 
     reset_netconfig_start();
@@ -400,6 +427,11 @@ void user_main(void)
     ret = tool_registry_init();
     if (ret != OPRT_OK) {
         PR_ERR("tool_registry_init failed rt:%d", ret);
+    }
+
+    ret = acp_client_init();
+    if (ret != OPRT_OK) {
+        PR_ERR("acp_client_init failed rt:%d", ret);
     }
 
     ret = agent_loop_init();

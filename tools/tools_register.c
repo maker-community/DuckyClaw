@@ -12,6 +12,7 @@
 #include "tool_files.h"
 #include "tool_cron.h"
 #include "tool_wallpaper.h"
+#include "tool_openclaw_ctrl.h"
 #include "cron_service.h"
 #include "heartbeat.h"
 #include "memory_manager.h"
@@ -24,6 +25,9 @@
 #include "tool_exec.h"
 #endif
 
+#if defined(ENABLE_HARDWARE_MCP) && (ENABLE_HARDWARE_MCP == 1)
+#include "tool_hw.h"
+#endif
 /***********************************************************
 ***********************function define**********************
 ***********************************************************/
@@ -40,7 +44,7 @@ static OPERATE_RET __ai_mcp_init(void *data)
     #endif
 
     /* Initialize filesystem (mount SD card if needed, create default files) */
-    TUYA_CALL_ERR_RETURN(tool_files_fs_init());
+    TUYA_CALL_ERR_LOG(tool_files_fs_init());
 
     /* Initialize and start cron service */
     TUYA_CALL_ERR_LOG(cron_service_init());
@@ -58,10 +62,10 @@ static OPERATE_RET __ai_mcp_init(void *data)
     TUYA_CALL_ERR_LOG(skill_loader_init());
 
     /* Register file operation tools */
-    TUYA_CALL_ERR_RETURN(tool_files_register());
+    TUYA_CALL_ERR_LOG(tool_files_register());
 
     /* Register cron tools */
-    TUYA_CALL_ERR_RETURN(tool_cron_register());
+    TUYA_CALL_ERR_LOG(tool_cron_register());
 
     /* Register wallpaper tool */
     TUYA_CALL_ERR_RETURN(tool_wallpaper_register());
@@ -71,7 +75,15 @@ static OPERATE_RET __ai_mcp_init(void *data)
 
     /* Register exec/system tools */
     #if defined(PLATFORM_LINUX) && (PLATFORM_LINUX == 1)
-    TUYA_CALL_ERR_RETURN(tool_exec_register());
+    TUYA_CALL_ERR_LOG(tool_exec_register());
+    #endif
+
+    /* Register OpenClaw/PC control tool */
+    TUYA_CALL_ERR_LOG(tool_openclaw_ctrl_register());
+
+    /* Register hardware peripheral tools */
+    #if defined(ENABLE_HARDWARE_MCP) && (ENABLE_HARDWARE_MCP == 1)
+    TUYA_CALL_ERR_LOG(tool_hw_register());
     #endif
 
     PR_DEBUG("MCP Server initialized successfully with tools");
