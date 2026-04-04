@@ -33,6 +33,33 @@
 /***********************************************************
 ************************macro define************************
 ***********************************************************/
+#if (defined(CONFIG_AI_DISP_VIDEO_ROTATION_0) && (CONFIG_AI_DISP_VIDEO_ROTATION_0 == 1)) || \
+    (defined(AI_DISP_VIDEO_ROTATION_0) && (AI_DISP_VIDEO_ROTATION_0 == 1))
+#define AI_MCP_PHOTO_ROTATION TUYA_DISPLAY_ROTATION_0
+#elif (defined(CONFIG_AI_DISP_VIDEO_ROTATION_90) && (CONFIG_AI_DISP_VIDEO_ROTATION_90 == 1)) || \
+    (defined(AI_DISP_VIDEO_ROTATION_90) && (AI_DISP_VIDEO_ROTATION_90 == 1))
+#define AI_MCP_PHOTO_ROTATION TUYA_DISPLAY_ROTATION_90
+#elif (defined(CONFIG_AI_DISP_VIDEO_ROTATION_180) && (CONFIG_AI_DISP_VIDEO_ROTATION_180 == 1)) || \
+    (defined(AI_DISP_VIDEO_ROTATION_180) && (AI_DISP_VIDEO_ROTATION_180 == 1))
+#define AI_MCP_PHOTO_ROTATION TUYA_DISPLAY_ROTATION_180
+#elif (defined(CONFIG_AI_DISP_VIDEO_ROTATION_270) && (CONFIG_AI_DISP_VIDEO_ROTATION_270 == 1)) || \
+    (defined(AI_DISP_VIDEO_ROTATION_270) && (AI_DISP_VIDEO_ROTATION_270 == 1))
+#define AI_MCP_PHOTO_ROTATION TUYA_DISPLAY_ROTATION_270
+#elif defined(CONFIG_TUYA_T5AI_BOARD_EX_MODULE_35565LCD) && (CONFIG_TUYA_T5AI_BOARD_EX_MODULE_35565LCD == 1)
+#define AI_MCP_PHOTO_ROTATION TUYA_DISPLAY_ROTATION_270
+#elif defined(TUYA_T5AI_BOARD_EX_MODULE_35565LCD) && (TUYA_T5AI_BOARD_EX_MODULE_35565LCD == 1)
+#define AI_MCP_PHOTO_ROTATION TUYA_DISPLAY_ROTATION_270
+#else
+#define AI_MCP_PHOTO_ROTATION TUYA_DISPLAY_ROTATION_0
+#endif
+
+#define AI_MCP_JPEG_SOI_SIZE               2
+#define AI_MCP_JPEG_EXIF_SEGMENT_SIZE      38
+#define AI_MCP_JPEG_EXIF_PAYLOAD_LEN       34
+#define AI_MCP_EXIF_ORIENTATION_NORMAL     1
+#define AI_MCP_EXIF_ORIENTATION_ROTATE_180 3
+#define AI_MCP_EXIF_ORIENTATION_ROTATE_90  6
+#define AI_MCP_EXIF_ORIENTATION_ROTATE_270 8
 
 
 /***********************************************************
@@ -48,6 +75,87 @@
 /***********************************************************
 ***********************function define**********************
 ***********************************************************/
+static uint16_t __get_photo_exif_orientation(void)
+{
+    switch (AI_MCP_PHOTO_ROTATION) {
+    case TUYA_DISPLAY_ROTATION_90:
+        return AI_MCP_EXIF_ORIENTATION_ROTATE_270;
+    case TUYA_DISPLAY_ROTATION_180:
+        return AI_MCP_EXIF_ORIENTATION_ROTATE_180;
+    case TUYA_DISPLAY_ROTATION_270:
+        return AI_MCP_EXIF_ORIENTATION_ROTATE_90;
+    case TUYA_DISPLAY_ROTATION_0:
+    default:
+        return AI_MCP_EXIF_ORIENTATION_NORMAL;
+    }
+}
+
+static bool __jpeg_has_exif_orientation(const uint8_t *jpeg_data, uint32_t jpeg_size)
+{
+    if (!jpeg_data || jpeg_size < 12) {
+        return false;
+    }
+
+    if (jpeg_data[0] != 0xFF || jpeg_data[1] != 0xD8) {
+        return false;
+    }
+
+    if (jpeg_data[2] != 0xFF || jpeg_data[3] != 0xE1) {
+        return false;
+    }
+
+    if (memcmp(&jpeg_data[6], "Exif\0\0", 6) != 0) {
+        return false;
+    }
+
+    return true;
+}
+
+static OPERATE_RET __jpeg_add_exif_orientation(const uint8_t *src,
+                                               uint32_t src_len,
+                                               uint16_t orientation,
+                                               uint8_t **dst,
+                                               uint32_t *dst_len)
+{
+    static const uint8_t exif_prefix[AI_MCP_JPEG_EXIF_SEGMENT_SIZE - AI_MCP_JPEG_SOI_SIZE] = {
+        0xFF, 0xE1, 0x00, 0x22,
+        0x45, 0x78, 0x69, 0x66, 0x00, 0x00,
+        0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00,
+        0x01, 0x00,
+        0x12, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+    };
+    uint8_t *out = NULL;
+
+    if (!src || !dst || !dst_len || src_len < AI_MCP_JPEG_SOI_SIZE) {
+        return OPRT_INVALID_PARM;
+    }
+
+    if (src[0] != 0xFF || src[1] != 0xD8) {
+        return OPRT_NOT_SUPPORTED;
+    }
+
+    out = (uint8_t *)tal_malloc(src_len + AI_MCP_JPEG_EXIF_SEGMENT_SIZE);
+    if (!out) {
+        return OPRT_MALLOC_FAILED;
+    }
+
+    memcpy(out, src, AI_MCP_JPEG_SOI_SIZE);
+    memcpy(out + AI_MCP_JPEG_SOI_SIZE,
+           exif_prefix,
+           sizeof(exif_prefix));
+    out[AI_MCP_JPEG_SOI_SIZE + 28] = (uint8_t)(orientation & 0xFF);
+    out[AI_MCP_JPEG_SOI_SIZE + 29] = (uint8_t)((orientation >> 8) & 0xFF);
+    memcpy(out + AI_MCP_JPEG_EXIF_SEGMENT_SIZE,
+           src + AI_MCP_JPEG_SOI_SIZE,
+           src_len - AI_MCP_JPEG_SOI_SIZE);
+
+    *dst = out;
+    *dst_len = src_len + AI_MCP_JPEG_EXIF_SEGMENT_SIZE;
+    return OPRT_OK;
+}
+
 static OPERATE_RET __get_device_info(const MCP_PROPERTY_LIST_T *properties, MCP_RETURN_VALUE_T *ret_val, void *user_data)
 {
     cJSON *json = NULL;
@@ -74,7 +182,11 @@ static OPERATE_RET __take_photo(const MCP_PROPERTY_LIST_T *properties, MCP_RETUR
 {
     OPERATE_RET rt = OPRT_OK;
     uint8_t *image_data = NULL;
+    uint8_t *upload_image_data = NULL;
+    uint8_t *oriented_image_data = NULL;
     uint32_t image_size = 0;
+    uint32_t upload_image_size = 0;
+    uint16_t exif_orientation = AI_MCP_EXIF_ORIENTATION_NORMAL;
 
 #if defined(ENABLE_COMP_AI_PICTURE) && (ENABLE_COMP_AI_PICTURE == 1) && \
     defined(ENABLE_COMP_AI_DISPLAY) && (ENABLE_COMP_AI_DISPLAY == 1)
@@ -92,11 +204,40 @@ static OPERATE_RET __take_photo(const MCP_PROPERTY_LIST_T *properties, MCP_RETUR
         return rt;
     }
 
-    rt = ai_mcp_return_value_set_image(ret_val, MCP_IMAGE_MIME_TYPE_JPEG, image_data, image_size);
+    upload_image_data = image_data;
+    upload_image_size = image_size;
+    exif_orientation = __get_photo_exif_orientation();
+
+    if (exif_orientation != AI_MCP_EXIF_ORIENTATION_NORMAL &&
+        false == __jpeg_has_exif_orientation(image_data, image_size)) {
+        rt = __jpeg_add_exif_orientation(image_data,
+                                         image_size,
+                                         exif_orientation,
+                                         &oriented_image_data,
+                                         &upload_image_size);
+        if (rt == OPRT_OK) {
+            upload_image_data = oriented_image_data;
+            PR_NOTICE("photo upload: injected EXIF orientation=%u", exif_orientation);
+        } else {
+            PR_ERR("photo upload: inject EXIF orientation failed, rt:%d", rt);
+            upload_image_data = image_data;
+            upload_image_size = image_size;
+        }
+    }
+
+    rt = ai_mcp_return_value_set_image(ret_val, MCP_IMAGE_MIME_TYPE_JPEG, upload_image_data, upload_image_size);
     if (OPRT_OK != rt) {
         PR_ERR("set return image err, rt:%d", rt);
+        if (oriented_image_data) {
+            tal_free(oriented_image_data);
+        }
         ai_video_jpeg_image_free(&image_data);
         return rt;
+    }
+
+    if (oriented_image_data) {
+        tal_free(oriented_image_data);
+        oriented_image_data = NULL;
     }
 
     TUYA_CALL_ERR_LOG(ai_video_display_stop());

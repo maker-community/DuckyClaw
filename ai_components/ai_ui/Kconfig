@@ -46,6 +46,7 @@ if(!ENABLE_AI_CHAT_CUSTOM_UI)
 
     choice 
         prompt "choose display video output rotation"
+        default AI_DISP_VIDEO_ROTATION_270 if TUYA_T5AI_BOARD_EX_MODULE_35565LCD
         default AI_DISP_VIDEO_ROTATION_0
         depends on ENABLE_COMP_AI_VIDEO
             
