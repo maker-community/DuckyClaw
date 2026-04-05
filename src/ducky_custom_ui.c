@@ -24,6 +24,10 @@
 #include "font_awesome_symbols.h"
 #include "cron_service.h"
 
+#if defined(ENABLE_BATTERY_MONITOR) && (ENABLE_BATTERY_MONITOR == 1)
+#include "bq27220.h"
+#endif
+
 #if defined(ENABLE_COMP_AI_VIDEO) && (ENABLE_COMP_AI_VIDEO == 1)
 #include "tdl_display_manage.h"
 #include "lv_port_disp.h"
@@ -76,6 +80,8 @@ typedef struct {
     lv_obj_t *notification_label;
     lv_obj_t *status_label;
     lv_obj_t *network_label;
+    lv_obj_t *battery_icon_label;
+    lv_obj_t *battery_label;
 
     /* Time panel */
     lv_obj_t *time_panel;
@@ -103,6 +109,100 @@ static lv_point_t        sg_last_tap_point  = {0, 0};
 static lv_timer_t       *sg_notification_tm = NULL;
 static lv_timer_t       *sg_clock_tm        = NULL;
 static lv_timer_t       *sg_sys_poll_tm     = NULL;
+static lv_timer_t       *sg_battery_tm      = NULL;
+
+#define DUCKY_TOP_BAR_CENTER_W 150
+#define DUCKY_BATTERY_TEXT_W   48
+
+static lv_color_t __battery_color_from_state(int soc, bool is_charging, bool is_available)
+{
+    if (!is_available) {
+        return lv_color_hex(0x8E8E93);
+    }
+
+    if (is_charging) {
+        return lv_color_hex(0x32D74B);
+    }
+
+    if (soc <= 15) {
+        return lv_color_hex(0xFF453A);
+    }
+
+    if (soc <= 35) {
+        return lv_color_hex(0xFFD60A);
+    }
+
+    return lv_color_white();
+}
+
+static const char *__battery_icon_from_soc(int soc, bool is_charging)
+{
+#if defined(ENABLE_BATTERY_MONITOR) && (ENABLE_BATTERY_MONITOR == 1)
+    if (is_charging) {
+        return FONT_AWESOME_BATTERY_CHARGING;
+    }
+
+    if (soc >= 90) {
+        return FONT_AWESOME_BATTERY_FULL;
+    }
+
+    if (soc >= 65) {
+        return FONT_AWESOME_BATTERY_3;
+    }
+
+    if (soc >= 35) {
+        return FONT_AWESOME_BATTERY_2;
+    }
+
+    if (soc >= 10) {
+        return FONT_AWESOME_BATTERY_1;
+    }
+
+    return FONT_AWESOME_BATTERY_EMPTY;
+#else
+    (void)soc;
+    (void)is_charging;
+    return FONT_AWESOME_BATTERY_SLASH;
+#endif
+}
+
+static void __update_battery_display(void)
+{
+    const char *icon_text = FONT_AWESOME_BATTERY_SLASH;
+    char percent_text[12] = "--%";
+    lv_color_t battery_color = lv_color_hex(0x8E8E93);
+    bool is_available = false;
+
+    if (!sg_ui.battery_icon_label || !sg_ui.battery_label) {
+        return;
+    }
+
+#if defined(ENABLE_BATTERY_MONITOR) && (ENABLE_BATTERY_MONITOR == 1)
+    int soc = bq27220_get_soc();
+
+    if (soc >= 0) {
+        bool is_charging = (bq27220_is_charging() == TRUE);
+
+        if (soc > 100) {
+            soc = 100;
+        }
+
+        is_available = true;
+        icon_text = __battery_icon_from_soc(soc, is_charging);
+        snprintf(percent_text, sizeof(percent_text), "%d%%", soc);
+        battery_color = __battery_color_from_state(soc, is_charging, true);
+    }
+#endif
+
+    if (!is_available) {
+        battery_color = __battery_color_from_state(0, false, false);
+    }
+
+    lv_label_set_text(sg_ui.battery_icon_label, icon_text);
+    lv_label_set_text(sg_ui.battery_label, percent_text);
+    lv_obj_set_style_text_color(sg_ui.battery_icon_label, battery_color, 0);
+    lv_obj_set_style_text_color(sg_ui.battery_label, battery_color, 0);
+}
 
 /* ── Shared display rotation config for camera preview and static photo ── */
 #if (defined(CONFIG_AI_DISP_VIDEO_ROTATION_0) && (CONFIG_AI_DISP_VIDEO_ROTATION_0 == 1)) || \
@@ -561,6 +661,19 @@ static void __clock_update_cb(lv_timer_t *timer)
     lv_vendor_disp_unlock();
 }
 
+static void __battery_update_cb(lv_timer_t *timer)
+{
+    (void)timer;
+
+    if (!sg_ui.battery_icon_label || !sg_ui.battery_label) {
+        return;
+    }
+
+    lv_vendor_disp_lock();
+    __update_battery_display();
+    lv_vendor_disp_unlock();
+}
+
 /* ── Glass Style Helper ── */
 static void __apply_glass_style(lv_obj_t *obj, lv_coord_t radius)
 {
@@ -655,16 +768,23 @@ static OPERATE_RET __ui_init(void)
     lv_obj_set_style_text_color(sg_ui.chat_mode_label, lv_color_white(), 0);
     lv_obj_align(sg_ui.chat_mode_label, LV_ALIGN_LEFT_MID, 12, 0);
 
+    /* WiFi icon */
+    sg_ui.network_label = lv_label_create(sg_ui.top_bar);
+    lv_obj_set_style_text_font(sg_ui.network_label, ai_ui_get_icon_font(), 0);
+    lv_obj_set_style_text_color(sg_ui.network_label, lv_color_white(), 0);
+    lv_label_set_text(sg_ui.network_label, ai_ui_get_wifi_icon(AI_UI_WIFI_STATUS_DISCONNECTED));
+    lv_obj_align_to(sg_ui.network_label, sg_ui.chat_mode_label, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
+
     sg_ui.notification_label = lv_label_create(sg_ui.top_bar);
     lv_label_set_text(sg_ui.notification_label, "");
-    lv_obj_set_width(sg_ui.notification_label, LV_HOR_RES - 120);
+    lv_obj_set_width(sg_ui.notification_label, DUCKY_TOP_BAR_CENTER_W);
     lv_obj_set_style_text_align(sg_ui.notification_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(sg_ui.notification_label, lv_color_hex(0xFFD60A), 0);
     lv_obj_align(sg_ui.notification_label, LV_ALIGN_CENTER, 0, 0);
     lv_obj_add_flag(sg_ui.notification_label, LV_OBJ_FLAG_HIDDEN);
 
     sg_ui.status_label = lv_label_create(sg_ui.top_bar);
-    lv_obj_set_width(sg_ui.status_label, LV_HOR_RES - 120);
+    lv_obj_set_width(sg_ui.status_label, DUCKY_TOP_BAR_CENTER_W);
     lv_label_set_long_mode(sg_ui.status_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_label_set_text(sg_ui.status_label, "Initializing");
     lv_obj_set_style_text_align(sg_ui.status_label, LV_TEXT_ALIGN_CENTER, 0);
@@ -672,12 +792,20 @@ static OPERATE_RET __ui_init(void)
     lv_obj_set_style_text_opa(sg_ui.status_label, LV_OPA_80, 0);
     lv_obj_align(sg_ui.status_label, LV_ALIGN_CENTER, 0, 0);
 
-    /* WiFi icon */
-    sg_ui.network_label = lv_label_create(sg_ui.top_bar);
-    lv_obj_set_style_text_font(sg_ui.network_label, ai_ui_get_icon_font(), 0);
-    lv_obj_set_style_text_color(sg_ui.network_label, lv_color_white(), 0);
-    lv_label_set_text(sg_ui.network_label, ai_ui_get_wifi_icon(AI_UI_WIFI_STATUS_DISCONNECTED));
-    lv_obj_align(sg_ui.network_label, LV_ALIGN_RIGHT_MID, -12, 0);
+    sg_ui.battery_label = lv_label_create(sg_ui.top_bar);
+    lv_label_set_text(sg_ui.battery_label, "--%");
+    lv_label_set_long_mode(sg_ui.battery_label, LV_LABEL_LONG_CLIP);
+    lv_obj_set_width(sg_ui.battery_label, DUCKY_BATTERY_TEXT_W);
+    lv_obj_set_style_text_align(sg_ui.battery_label, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_color(sg_ui.battery_label, lv_color_white(), 0);
+    lv_obj_set_style_text_opa(sg_ui.battery_label, LV_OPA_90, 0);
+    lv_obj_align(sg_ui.battery_label, LV_ALIGN_RIGHT_MID, -12, 0);
+
+    sg_ui.battery_icon_label = lv_label_create(sg_ui.top_bar);
+    lv_obj_set_style_text_font(sg_ui.battery_icon_label, ai_ui_get_icon_font(), 0);
+    lv_obj_set_style_text_color(sg_ui.battery_icon_label, lv_color_white(), 0);
+    lv_label_set_text(sg_ui.battery_icon_label, FONT_AWESOME_BATTERY_SLASH);
+    lv_obj_align_to(sg_ui.battery_icon_label, sg_ui.battery_label, LV_ALIGN_OUT_LEFT_MID, -6, 0);
 
     /* ── TIME PANEL ── */
     sg_ui.time_panel = lv_obj_create(sg_ui.screen);
@@ -765,6 +893,10 @@ static OPERATE_RET __ui_init(void)
     /* Clock timer: fires every 30s, immediately on first run */
     sg_clock_tm = lv_timer_create(__clock_update_cb, 30000, NULL);
     lv_timer_ready(sg_clock_tm);
+
+    /* Battery timer: fires every 1s for near-real-time charge state updates */
+    sg_battery_tm = lv_timer_create(__battery_update_cb, 1000, NULL);
+    lv_timer_ready(sg_battery_tm);
 
     /* Sys status poll timer: fires every 15s, immediately on first run */
     sg_sys_poll_tm = lv_timer_create(__sys_poll_cb, 15000, NULL);

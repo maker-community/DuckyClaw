@@ -2,12 +2,14 @@
  * @file bq27220.h
  * @brief BQ27220 single-cell Li-ion fuel gauge driver for TuyaOpen / T5AI board.
  *
- * Hardware connection: P8 = SCL, P9 = SDA
+ * Hardware connection: P8 = SCL, P1 = SDA
  * I2C address: 0x55 (fixed)
  */
 
 #ifndef __BQ27220_H__
 #define __BQ27220_H__
+
+#include <stdint.h>
 
 #include "tuya_cloud_types.h"
 
@@ -22,7 +24,7 @@ extern "C" {
 #define BQ27220_I2C_ADDR        0x55
 
 #define BQ27220_SCL_PIN         TUYA_GPIO_NUM_8
-#define BQ27220_SDA_PIN         TUYA_GPIO_NUM_9
+#define BQ27220_SDA_PIN         TUYA_GPIO_NUM_1
 
 /* Default battery pack nominal capacity used to sync BQ27220 design data. */
 #ifdef BATTERY_MONITOR_DESIGN_CAPACITY_MAH
