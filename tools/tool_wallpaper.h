@@ -31,8 +31,9 @@ OPERATE_RET tool_wallpaper_register(void);
 /**
  * @brief Restore wallpaper from KV (no-SD-card) or file (SD card) after boot.
  *
- * Must be called after WiFi/MQTT is connected (download needs network).
- * On SD card builds this is a no-op (file restore happens at UI init).
+ * Must be called after WiFi/MQTT is connected.
+ * On SD card builds this schedules a delayed file-based restore after the
+ * filesystem and UI have fully settled.
  *
  * @return OPERATE_RET OPRT_OK on success
  */

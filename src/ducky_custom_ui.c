@@ -135,9 +135,9 @@ static lv_color_t __battery_color_from_state(int soc, bool is_charging, bool is_
     return lv_color_white();
 }
 
+#if defined(ENABLE_BATTERY_MONITOR) && (ENABLE_BATTERY_MONITOR == 1)
 static const char *__battery_icon_from_soc(int soc, bool is_charging)
 {
-#if defined(ENABLE_BATTERY_MONITOR) && (ENABLE_BATTERY_MONITOR == 1)
     if (is_charging) {
         return FONT_AWESOME_BATTERY_CHARGING;
     }
@@ -159,12 +159,8 @@ static const char *__battery_icon_from_soc(int soc, bool is_charging)
     }
 
     return FONT_AWESOME_BATTERY_EMPTY;
-#else
-    (void)soc;
-    (void)is_charging;
-    return FONT_AWESOME_BATTERY_SLASH;
-#endif
 }
+#endif
 
 static void __update_battery_display(void)
 {
@@ -316,7 +312,7 @@ static OPERATE_RET __wallpaper_crop_and_scale_rgb565(const uint8_t *src_pixels,
 /* Load persisted wallpaper from filesystem and apply to screen.
  * Only active on SD card builds — SPIFFS restore is handled by
  * tool_wallpaper_restore() after MQTT connects. */
-static void __wallpaper_restore(void)
+OPERATE_RET ducky_custom_ui_restore_wallpaper(void)
 {
 #if defined(CLAW_USE_SDCARD) && (CLAW_USE_SDCARD == 1)
     PR_NOTICE("wallpaper: restore check %s", WALLPAPER_FILE);
@@ -324,21 +320,21 @@ static void __wallpaper_restore(void)
     TUYA_FILE f = claw_fopen(WALLPAPER_FILE, "r");
     if (!f) {
         PR_NOTICE("wallpaper: no saved wallpaper file, skip restore");
-        return;
+        return OPRT_OK;
     }
 
     int fsize = claw_fgetsize(WALLPAPER_FILE);
     if (fsize <= 0 || fsize > WALLPAPER_MAX_RESTORE_SIZE) {
         claw_fclose(f);
         PR_WARN("wallpaper: restore skipped, fsize=%d", fsize);
-        return;
+        return OPRT_INVALID_PARM;
     }
 
     uint8_t *buf = (uint8_t *)tal_malloc((uint32_t)fsize);
     if (!buf) {
         claw_fclose(f);
         PR_ERR("wallpaper: restore malloc failed for %d bytes", fsize);
-        return;
+        return OPRT_MALLOC_FAILED;
     }
 
     int rd = claw_fread(buf, fsize, f);
@@ -347,7 +343,7 @@ static void __wallpaper_restore(void)
     if (rd != fsize) {
         PR_ERR("wallpaper: restore read %d/%d bytes", rd, fsize);
         tal_free(buf);
-        return;
+        return OPRT_COM_ERROR;
     }
 
     PR_NOTICE("wallpaper: restoring %d bytes from SD card", fsize);
@@ -356,8 +352,10 @@ static void __wallpaper_restore(void)
         PR_ERR("wallpaper: restore apply failed, rt=%d", rt);
     }
     tal_free(buf);
+    return rt;
 #else
     PR_NOTICE("wallpaper: SPIFFS build, wallpaper restore via KV after WiFi connects");
+    return OPRT_OK;
 #endif
 }
 #endif
@@ -902,11 +900,6 @@ static OPERATE_RET __ui_init(void)
     sg_sys_poll_tm = lv_timer_create(__sys_poll_cb, 15000, NULL);
     lv_timer_ready(sg_sys_poll_tm);
 
-#if defined(ENABLE_COMP_AI_PICTURE) && (ENABLE_COMP_AI_PICTURE == 1)
-    /* Restore wallpaper saved from previous session */
-    __wallpaper_restore();
-#endif
-
     return rt;
 }
 
@@ -1217,6 +1210,7 @@ OPERATE_RET ducky_custom_ui_set_wallpaper(const uint8_t *data, uint32_t size)
 #else   /* ENABLE_AI_CHAT_CUSTOM_UI */
 
 OPERATE_RET ducky_custom_ui_register(void)                       { return OPRT_OK; }
+OPERATE_RET ducky_custom_ui_restore_wallpaper(void)              { return OPRT_OK; }
 OPERATE_RET ducky_custom_ui_set_news(const char *n)              { (void)n; return OPRT_NOT_SUPPORTED; }
 OPERATE_RET ducky_custom_ui_set_image_desc(const char *d)        { (void)d; return OPRT_NOT_SUPPORTED; }
 OPERATE_RET ducky_custom_ui_set_weather(const char *t)           { (void)t; return OPRT_NOT_SUPPORTED; }

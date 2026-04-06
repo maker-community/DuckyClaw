@@ -21,6 +21,16 @@ OPERATE_RET ducky_custom_ui_set_almanac(const char *text);
 OPERATE_RET ducky_custom_ui_set_sys_status(const char *text);
 
 /**
+ * @brief Restore wallpaper from persistent storage when available.
+ *
+ * On SD-card builds this loads `/sdcard/config/wallpaper.jpg` after the
+ * filesystem has been mounted. On non-SD builds this is a no-op.
+ *
+ * @return OPERATE_RET OPRT_OK on success or when no wallpaper is available
+ */
+OPERATE_RET ducky_custom_ui_restore_wallpaper(void);
+
+/**
  * @brief Set the screen background wallpaper from raw JPEG data.
  *
  * Downloads the full JPEG image (already in memory) and decodes it to

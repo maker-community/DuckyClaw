@@ -39,6 +39,7 @@
 /* Maximum wallpaper file size (256 KB is generous for a compressed JPEG) */
 #define WALLPAPER_MAX_SIZE    (512 * 1024)
 #define WALLPAPER_CHUNK_SIZE  1024
+#define WALLPAPER_RESTORE_DELAY_MS 10000
 
 /* KV key used to persist the wallpaper URL when SD card is not available */
 #define WALLPAPER_KV_KEY      "ducky_wallpaper_url"
@@ -56,9 +57,53 @@ typedef struct {
     char url[512];
 } WALLPAPER_TASK_ARG_T;
 
+#if defined(CLAW_USE_SDCARD) && (CLAW_USE_SDCARD == 1) && defined(WALLPAPER_HAS_UI)
+static TIMER_ID s_wallpaper_restore_timer = NULL;
+
+static void __wallpaper_restore_task(void *arg)
+{
+    (void)arg;
+
+    PR_NOTICE("wallpaper: async SD restore task start");
+
+    OPERATE_RET rt = ducky_custom_ui_restore_wallpaper();
+    if (rt != OPRT_OK) {
+        PR_WARN("wallpaper: async SD restore failed, rt=%d", rt);
+    }
+}
+#endif
+
 /***********************************************************
 ***********************function define**********************
 ***********************************************************/
+
+#if defined(CLAW_USE_SDCARD) && (CLAW_USE_SDCARD == 1) && defined(WALLPAPER_HAS_UI)
+static void __wallpaper_restore_timer_cb(TIMER_ID timer_id, void *arg)
+{
+    THREAD_CFG_T cfg;
+    THREAD_HANDLE thrd;
+
+    (void)timer_id;
+    (void)arg;
+
+    PR_NOTICE("wallpaper: delayed restore timer fired");
+
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.stackDepth = 1024 * 8;
+    cfg.priority   = THREAD_PRIO_1;
+    cfg.thrdname   = "wp_sd_restore";
+
+    OPERATE_RET rt = tal_thread_create_and_start(&thrd,
+                                                 NULL,
+                                                 NULL,
+                                                 __wallpaper_restore_task,
+                                                 NULL,
+                                                 &cfg);
+    if (rt != OPRT_OK) {
+        PR_WARN("wallpaper: delayed restore task start failed, rt=%d", rt);
+    }
+}
+#endif
 
 static bool __str_ieq_n(const char *lhs, const char *rhs, size_t len)
 {
@@ -389,7 +434,26 @@ OPERATE_RET tool_wallpaper_register(void)
  */
 OPERATE_RET tool_wallpaper_restore(void)
 {
-#if !defined(CLAW_USE_SDCARD) || (CLAW_USE_SDCARD == 0)
+#if defined(CLAW_USE_SDCARD) && (CLAW_USE_SDCARD == 1)
+#if defined(WALLPAPER_HAS_UI)
+    if (!s_wallpaper_restore_timer) {
+        OPERATE_RET rt = tal_sw_timer_create(__wallpaper_restore_timer_cb,
+                                             NULL,
+                                             &s_wallpaper_restore_timer);
+        if (rt != OPRT_OK) {
+            PR_ERR("wallpaper: create delayed restore timer failed, rt=%d", rt);
+            return rt;
+        }
+    }
+
+    PR_NOTICE("wallpaper: delayed restore scheduled in %d ms", WALLPAPER_RESTORE_DELAY_MS);
+    return tal_sw_timer_start(s_wallpaper_restore_timer,
+                              WALLPAPER_RESTORE_DELAY_MS,
+                              TAL_TIMER_ONCE);
+#else
+    return OPRT_OK;
+#endif
+#else
     uint8_t *url_buf = NULL;
     size_t   url_len = 0;
 
@@ -434,6 +498,6 @@ OPERATE_RET tool_wallpaper_restore(void)
         return rt;
     }
     PR_NOTICE("wallpaper: 恢复下载线程已启动");
-#endif
     return OPRT_OK;
+#endif
 }

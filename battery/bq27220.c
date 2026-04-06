@@ -2,7 +2,7 @@
  * @file bq27220.c
  * @brief BQ27220 single-cell Li-ion fuel gauge driver for TuyaOpen / T5AI board.
  *
- * Hardware connection: P8 = SCL, P1 = SDA (GPIO bit-bang on TUYA_I2C_NUM_2)
+ * Hardware connection: P0 = SCL, P1 = SDA (GPIO bit-bang on TUYA_I2C_NUM_2)
  * I2C address: 0x55 (fixed, not configurable on BQ27220)
  *
  * All multi-byte registers are little-endian.
@@ -530,7 +530,7 @@ OPERATE_RET bq27220_init(void)
 {
     OPERATE_RET rt;
 
-    PR_DEBUG("bq27220: init start (P8=SCL P9=SDA gpio bit-bang)");
+    PR_DEBUG("bq27220: init start (P0=SCL P1=SDA gpio bit-bang)");
 
     __bb_scl_release();
     __bb_sda_release();
@@ -716,6 +716,7 @@ void bq27220_deinit(void)
 int bq27220_get_soc(void)
 {
     uint16_t val = 0;
+    if (!s_initialized) return -1;
     if (__read_reg16(CMD_STATE_OF_CHARGE, &val) != OPRT_OK) return -1;
     return (val > 100) ? 100 : (int)val;
 }
@@ -723,6 +724,7 @@ int bq27220_get_soc(void)
 int bq27220_get_voltage(void)
 {
     uint16_t val = 0;
+    if (!s_initialized) return -1;
     if (__read_reg16(CMD_VOLTAGE, &val) != OPRT_OK) return -1;
     return (int)val;
 }
@@ -730,6 +732,7 @@ int bq27220_get_voltage(void)
 int bq27220_get_current(void)
 {
     uint16_t val = 0;
+    if (!s_initialized) return (int)INT16_MIN;
     if (__read_reg16(CMD_CURRENT, &val) != OPRT_OK) return (int)INT16_MIN;
     return (int)(int16_t)val;
 }
@@ -737,6 +740,7 @@ int bq27220_get_current(void)
 int bq27220_get_temperature(void)
 {
     uint16_t val = 0;
+    if (!s_initialized) return (int)INT16_MIN;
     if (__read_reg16(CMD_TEMPERATURE, &val) != OPRT_OK) return (int)INT16_MIN;
     /* Register unit: 0.1 K — convert to °C */
     return (int)((int)(val / 10) - 273);
@@ -745,6 +749,7 @@ int bq27220_get_temperature(void)
 int bq27220_get_remaining_capacity(void)
 {
     uint16_t val = 0;
+    if (!s_initialized) return -1;
     if (__read_reg16(CMD_REMAINING_CAPACITY, &val) != OPRT_OK) return -1;
     return (int)val;
 }
@@ -752,6 +757,7 @@ int bq27220_get_remaining_capacity(void)
 int bq27220_get_full_capacity(void)
 {
     uint16_t val = 0;
+    if (!s_initialized) return -1;
     if (__read_reg16(CMD_FULL_CHARGE_CAPACITY, &val) != OPRT_OK) return -1;
     return (int)val;
 }
@@ -759,6 +765,7 @@ int bq27220_get_full_capacity(void)
 int bq27220_get_design_capacity(void)
 {
     uint16_t val = 0;
+    if (!s_initialized) return -1;
     if (__read_reg16(CMD_DESIGN_CAPACITY, &val) != OPRT_OK) return -1;
     return (int)val;
 }
@@ -766,6 +773,7 @@ int bq27220_get_design_capacity(void)
 int bq27220_get_soh(void)
 {
     uint16_t val = 0;
+    if (!s_initialized) return -1;
     if (__read_reg16(CMD_STATE_OF_HEALTH, &val) != OPRT_OK) return -1;
     return (val > 100) ? 100 : (int)val;
 }
@@ -773,6 +781,7 @@ int bq27220_get_soh(void)
 int bq27220_get_average_power(void)
 {
     uint16_t val = 0;
+    if (!s_initialized) return (int)INT16_MIN;
     if (__read_reg16(CMD_AVERAGE_POWER, &val) != OPRT_OK) return (int)INT16_MIN;
     return (int)(int16_t)val;
 }
@@ -780,6 +789,7 @@ int bq27220_get_average_power(void)
 int bq27220_get_time_to_empty(void)
 {
     uint16_t val = 0;
+    if (!s_initialized) return -1;
     if (__read_reg16(CMD_TIME_TO_EMPTY, &val) != OPRT_OK) return -1;
     if (val == 0xFFFF) return -1;
     return (int)val;
@@ -788,6 +798,7 @@ int bq27220_get_time_to_empty(void)
 int bq27220_get_time_to_full(void)
 {
     uint16_t val = 0;
+    if (!s_initialized) return -1;
     if (__read_reg16(CMD_TIME_TO_FULL, &val) != OPRT_OK) return -1;
     if (val == 0xFFFF) return -1;
     return (int)val;
@@ -796,6 +807,7 @@ int bq27220_get_time_to_full(void)
 int bq27220_get_cycle_count(void)
 {
     uint16_t val = 0;
+    if (!s_initialized) return -1;
     if (__read_reg16(CMD_CYCLE_COUNT, &val) != OPRT_OK) return -1;
     return (int)val;
 }
@@ -803,6 +815,7 @@ int bq27220_get_cycle_count(void)
 OPERATE_RET bq27220_get_battery_status(bq27220_status_t *status)
 {
     if (!status) return OPRT_INVALID_PARM;
+    if (!s_initialized) return OPRT_RESOURCE_NOT_READY;
     uint16_t val = 0;
     OPERATE_RET rt = __read_reg16(CMD_BATTERY_STATUS, &val);
     if (rt != OPRT_OK) return rt;
