@@ -177,7 +177,7 @@ OPERATE_RET ai_video_init(AI_VIDEO_CFG_T *vi_cfg)
 #endif
 
     TUYA_CALL_ERR_RETURN(tal_workq_init_delayed(WORKQ_SYSTEM, __video_init_workq, &sg_camera_cfg, &sg_delayed_work));
-    TUYA_CALL_ERR_RETURN(tal_workq_start_delayed(sg_delayed_work, 500, LOOP_ONCE));
+    TUYA_CALL_ERR_RETURN(tal_workq_start_delayed(sg_delayed_work, 3000, LOOP_ONCE));
 
     PR_NOTICE("camera init success");
 

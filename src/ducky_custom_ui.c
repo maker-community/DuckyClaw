@@ -892,13 +892,13 @@ static OPERATE_RET __ui_init(void)
     sg_clock_tm = lv_timer_create(__clock_update_cb, 30000, NULL);
     lv_timer_ready(sg_clock_tm);
 
-    /* Battery timer: fires every 1s for near-real-time charge state updates */
-    sg_battery_tm = lv_timer_create(__battery_update_cb, 1000, NULL);
-    lv_timer_ready(sg_battery_tm);
+    /* Battery timer: fires every 30s.
+     * BQ27220 init is deferred by 3s, so no point polling earlier.
+     * SoC changes slowly enough that 30s is sufficient. */
+    sg_battery_tm = lv_timer_create(__battery_update_cb, 30000, NULL);
 
-    /* Sys status poll timer: fires every 15s, immediately on first run */
+    /* Sys status poll timer: fires every 15s (no immediate first run) */
     sg_sys_poll_tm = lv_timer_create(__sys_poll_cb, 15000, NULL);
-    lv_timer_ready(sg_sys_poll_tm);
 
     return rt;
 }

@@ -18,8 +18,9 @@
 /***********************************************************
 ************************macro define************************
 ***********************************************************/
-#define RESET_NETCNT_NAME "rst_cnt"
-#define RESET_NETCNT_MAX  3
+#define RESET_NETCNT_NAME    "rst_cnt"
+#define RESET_NETCNT_MAX     5
+#define RESET_CNT_CLEAR_MS   15000
 
 /***********************************************************
 ***********************typedef define***********************
@@ -66,13 +67,20 @@ static int reset_count_write(uint8_t count)
 static void reset_netconfig_timer(TIMER_ID timer_id, void *arg)
 {
     reset_count_write(0);
-    PR_DEBUG("reset cnt clear!");
+    PR_DEBUG("reset cnt clear by timer!");
 }
 
 static OPERATE_RET __reset_netconfig_clear(void *data)
 {
     reset_count_write(0);
     PR_DEBUG("reset cnt clear by reset event!");
+    return OPRT_OK;
+}
+
+static OPERATE_RET __reset_netconfig_mqtt_clear(void *data)
+{
+    reset_count_write(0);
+    PR_DEBUG("reset cnt clear by MQTT connected (boot success)!");
     return OPRT_OK;
 }
 
@@ -102,10 +110,14 @@ int reset_netconfig_start(void)
     TUYA_CALL_ERR_LOG(reset_count_read(&rst_cnt));
     TUYA_CALL_ERR_LOG(reset_count_write(++rst_cnt));
 
-    PR_DEBUG("start reset cnt clear timer!!!!!");
+    PR_NOTICE("reset cnt: %d / %d, clear timer: %d ms", rst_cnt, RESET_NETCNT_MAX, RESET_CNT_CLEAR_MS);
     TIMER_ID rst_config_timer;
     tal_sw_timer_create(reset_netconfig_timer, NULL, &rst_config_timer);
-    tal_sw_timer_start(rst_config_timer, 5000, TAL_TIMER_ONCE);
+    tal_sw_timer_start(rst_config_timer, RESET_CNT_CLEAR_MS, TAL_TIMER_ONCE);
+
+    /* Also clear counter when MQTT connects — definitive boot-success signal */
+    tal_event_subscribe(EVENT_MQTT_CONNECTED, "reset_cnt_mqtt_clear",
+                        __reset_netconfig_mqtt_clear, SUBSCRIBE_TYPE_ONETIME);
 
     return OPRT_OK;
 }

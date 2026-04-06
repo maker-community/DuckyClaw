@@ -404,6 +404,23 @@ void user_main(void)
 
     PR_DEBUG("tuya_iot_init success");
 
+    /* ------------------------------------------------------------------
+     * Phase 1: Start IoT + check reset counter BEFORE heavy init.
+     * This ensures that if the reset counter reached the threshold
+     * (from previous crash loops), we handle it before camera/encoder
+     * init which is the most likely crash source (IPC heartbeat timeout).
+     * ------------------------------------------------------------------ */
+    tuya_iot_start(&ai_client);
+
+    tkl_wifi_set_lp_mode(0, 0);
+
+    reset_netconfig_check();
+
+    /* ------------------------------------------------------------------
+     * Phase 2: Board hardware & heavyweight component init.
+     * Camera / JPEG encoder / display init happen here.
+     * These are deferred where possible to avoid starving IPC heartbeat.
+     * ------------------------------------------------------------------ */
     ret = board_register_hardware();
     if (ret != OPRT_OK) {
         PR_ERR("board_register_hardware failed rt:%d", ret);
@@ -439,18 +456,11 @@ void user_main(void)
         PR_ERR("agent_loop_init failed rt:%d", ret);
     }
 
-    /* Start tuya iot task */
-    tuya_iot_start(&ai_client);
-
 #if defined(ENABLE_BATTERY_MONITOR) && (ENABLE_BATTERY_MONITOR == 1)
     /* Defer BQ27220 init until after WiFi/BLE stack is fully settled (~3s) */
     tal_sw_timer_create(__bq27220_delayed_init_cb, NULL, &sg_bq27220_init_timer);
     tal_sw_timer_start(sg_bq27220_init_timer, 3000, TAL_TIMER_ONCE);
 #endif
-
-    tkl_wifi_set_lp_mode(0, 0);
-
-    reset_netconfig_check();
 
     for (;;) {
         /* Loop to receive packets, and handles client keepalive */
